@@ -1,5 +1,5 @@
 name: Pushy Score
-description: Score a checkout of AI skills, prompt libraries, or MCP servers. Posts one sticky pull request comment. Does not upload your code.
+description: Score a checkout of AI skills, prompt libraries, or MCP servers and post one sticky pull request comment, or watch other repos on a schedule and open an issue when a score drops. Does not upload your code.
 author: forcepushcoin
 branding:
   icon: shield
@@ -21,13 +21,53 @@ inputs:
     description: Token used only to post or update the pull request comment. The scan itself does not send file contents anywhere.
     required: false
     default: ${{ github.token }}
+  repos:
+    description: Watch mode. Repositories to scan on a schedule, one owner/repo[@branch-or-tag] per line (up to 25). When set, the action ignores path, comment and fail-under, and keeps one tracking issue in this repository.
+    required: false
+    default: ''
+  drop-threshold:
+    description: Watch mode. Alert when a score falls by at least this many points since the last run.
+    required: false
+    default: '5'
+  alert-severity:
+    description: Watch mode. Alert on a new finding at this severity or worse. critical, high or medium.
+    required: false
+    default: 'critical'
+  alert-below:
+    description: Watch mode. Also alert when a score falls under this number (once, when it crosses). Empty means off.
+    required: false
+    default: ''
+  issue-label:
+    description: Watch mode. Label of the tracking issue.
+    required: false
+    default: 'pushy-watch'
+  issue-title:
+    description: Watch mode. Title of the tracking issue, used when it is created.
+    required: false
+    default: 'Pushy watchlist'
+  dry-run:
+    description: Watch mode. Scan and print the result, but do not create or edit any issue or comment.
+    required: false
+    default: 'false'
+  fail-on-alert:
+    description: Watch mode. Fail the job when there is at least one alert.
+    required: false
+    default: 'false'
+  read-token:
+    description: Watch mode. Optional token (for example a fine-grained PAT with Contents read) used to clone and read watched private repositories. Public repos need none.
+    required: false
+    default: ''
 outputs:
   score:
     description: Integer score from 0 to 100.
   band:
     description: Band key. One of green, yellow, orange, red, gray.
   report-path:
-    description: Workspace path of the JSON report.
+    description: Workspace path of the JSON report (pushy-report.json, or pushy-watch-report.json in watch mode).
+  alerts:
+    description: Watch mode. Number of alerts raised in this run.
+  issue-url:
+    description: Watch mode. URL of the tracking issue.
 runs:
   using: node20
   main: action/index.js

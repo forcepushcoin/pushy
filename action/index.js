@@ -61,6 +61,7 @@ function reportFile(root) {
 }
 
 async function run() {
+  if (String(input('repos')).trim()) return require('./watch.js').run(); // watch mode: scan other repos, keep a tracking issue (docs/WATCH.md)
   var root = workspace();
   var rel = input('path') || '.';
   var scanPath = path.resolve(root, rel);

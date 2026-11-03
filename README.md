@@ -201,12 +201,17 @@ Automated scan, not an audit · Pushy needs no token
 | --- | --- |
 | Pushy Score | Live |
 | Pushy GitHub Action | Live |
+| [Watchlist](docs/WATCH.md) | Live |
 | [Commit Roast Card](roast/) | Live |
 | AI deep scan | Building |
-| Ship Log | Planned |
+| [Ship Log](https://forcepushcoin.github.io/shiplog/) | Live |
 | Rescue | Planned |
 
 **[Commit Roast Card](roast/)** (`roast/`): paste a public repo, get a funny, Pushy-voiced roast of its commit habits and a shareable 1200×630 card. Free, client-side, no backend, no account. Just for fun, not a code review. Live at <https://forcepushcoin.github.io/roast/>.
+
+**[Watchlist](docs/WATCH.md)**: the same action can scan other people's repos (the skills and MCP servers you depend on) on your own daily schedule and open an issue comment when a score drops or a new critical finding appears. It runs on your runner and needs no $FORCEPUSH token. Example: [`examples/watchlist.yml`](examples/watchlist.yml). Do not watch this repository: `fixtures/evil` is a planted bad sample and would raise a critical alert.
+
+**[Ship Log](shiplog/)**: paste a public repo and see what it shipped in the last 7, 30, or 90 days (releases, merged pull requests, commits). Free, client-side, no backend. Live at <https://forcepushcoin.github.io/shiplog/>.
 
 **[Bounties](BOUNTIES.md)** are planned at launch. The bounty wallet does not exist yet, so nothing is payable today.
 
@@ -238,7 +243,10 @@ Pushy Score is not affiliated with GitHub, Anthropic, or any scanner vendor.
 | --- | --- |
 | [`score/`](score/) | Pushy Score v1.1. Open `index.html` via a local server. |
 | [`roast/`](roast/) | Commit Roast Card. Open `index.html` via a local server. |
+| [`shiplog/`](shiplog/) | Ship Log. Open `index.html` via a local server. |
 | [`action.yml`](action.yml) | GitHub Action. `uses: forcepushcoin/pushy@v1`. |
+| [`action/watch.js`](action/watch.js) | Watch mode of the action. See [`docs/WATCH.md`](docs/WATCH.md). |
+| [`examples/`](examples/) | Example workflows. |
 | [`BOUNTIES.md`](BOUNTIES.md) | Bounty board rules. Payouts are planned at launch. |
 | [`assets/`](assets/) | `pp-avatar.jpg` (mascot on the scanner and at the top of this page) and `pp.jpg` (the same hamster on a CRT). |
 | [`docs/RULES.md`](docs/RULES.md) | Every rule id, severity, category, and description. |

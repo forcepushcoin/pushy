@@ -68,4 +68,4 @@ async function upsertComment(token, owner, repo, number, body) {
   return gh(token, 'POST', 'https://api.github.com/repos/' + owner + '/' + repo + '/issues/' + number + '/comments', { body: body });
 }
 
-module.exports = { findSticky: findSticky, listComments: listComments, listPullFiles: listPullFiles, upsertComment: upsertComment };
+module.exports = { gh: gh, findSticky: findSticky, listComments: listComments, listPullFiles: listPullFiles, upsertComment: upsertComment };

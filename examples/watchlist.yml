@@ -1,0 +1,35 @@
+# .github/workflows/pushy-watch.yml
+# Put this in a repository you own (a small private "watch" repo works well).
+# Once a day it scans the repos below and keeps one issue up to date.
+# It only opens an alert when a score drops or a new critical finding shows up.
+name: Pushy watchlist
+on:
+  schedule:
+    - cron: '17 6 * * *'   # daily, 06:17 UTC. Pick an odd minute; the top of the hour is busy.
+  workflow_dispatch:        # lets you run it by hand from the Actions tab
+permissions:
+  contents: read   # the action does not need your code, but this keeps the token narrow
+  issues: write    # the tracking issue and its alert comments
+concurrency:
+  group: pushy-watch
+  cancel-in-progress: false
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      # No actions/checkout needed: the action clones the repos below itself.
+      - uses: forcepushcoin/pushy@v1
+        with:
+          repos: |
+            anthropics/skills
+            modelcontextprotocol/servers
+            # pin a branch or tag with @
+            some-org/some-mcp-server@release/1.x
+            # Do not add forcepushcoin/pushy. fixtures/evil is a planted
+            # bad sample used by tests and would raise a critical alert.
+          drop-threshold: '5'        # alert when a score falls by 5 or more
+          alert-severity: critical   # new finding at this severity or worse (critical | high | medium)
+          # alert-below: '70'        # optional: also alert once when a score crosses under 70
+          # fail-on-alert: 'true'    # optional: make the job fail (and email you) on an alert
+          # read-token: ${{ secrets.WATCH_READ_TOKEN }}   # only for watching private repos

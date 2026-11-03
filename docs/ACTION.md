@@ -37,6 +37,9 @@ Check out the repo before the action. The scan reads that checkout. It does not 
 | `fail-under` | empty | Fail the job when the score is **below** this number. `70` fails on 69 and passes on 70. An empty value never fails because of the score. |
 | `comment` | `true` | On `pull_request`, post or update one comment. Any other event logs a skip. `false` posts nothing. |
 | `github-token` | `${{ github.token }}` | Sent only to `api.github.com`, to post the comment and to read changed file names. |
+| `repos` and the other watch inputs | empty | Watch mode: scan other repos on a schedule and keep a tracking issue. See [WATCH.md](WATCH.md). |
+
+Setting `repos` switches the action to watch mode and the inputs above (`path`, `comment`, `fail-under`) are ignored. See [WATCH.md](WATCH.md).
 
 ## Outputs
 
@@ -45,6 +48,7 @@ Check out the repo before the action. The scan reads that checkout. It does not 
 | `score` | Integer from 0 to 100. |
 | `band` | `green`, `yellow`, `orange`, `red`, or `gray`. |
 | `report-path` | Absolute path of `pushy-report.json` written at the workspace root. |
+| `alerts`, `issue-url` | Watch mode only. See [WATCH.md](WATCH.md). |
 
 The job summary (`GITHUB_STEP_SUMMARY`) gets a short version of the same verdict.
 

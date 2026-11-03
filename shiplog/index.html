@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ship Log — what did this repo ship? | $FORCEPUSH</title>
+<meta name="description" content="Paste a public GitHub repo and get a changelog of what it shipped in the last 7, 30 or 90 days: releases, merged PRs, commits and top contributors. Free, client-side, no backend. Automated summary, not an audit.">
+<meta name="theme-color" content="#0d1117">
+<link rel="icon" type="image/jpeg" href="../assets/pp-avatar.jpg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="shiplog.css">
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="../"><img src="../assets/pp-avatar.jpg" alt="" width="30" height="30">$FORCEPUSH</a>
+    <ul>
+      <li><a href="../">Home</a></li>
+      <li><a href="../score/">Pushy Score</a></li>
+      <li><a href="../roast/">Roast</a></li>
+      <li><a href="./" class="on" aria-current="page">Ship Log</a></li>
+      <li><a href="https://github.com/forcepushcoin/pushy" target="_blank" rel="noopener noreferrer" class="ext">Source</a></li>
+    </ul>
+  </div>
+</nav>
+
+<header class="hero" id="top">
+  <div class="wrap">
+    <h1><span>Ship</span> Log <span class="pill live">v1 · free</span></h1>
+    <p class="lead">Paste a <b>public GitHub repo</b> and pick a window. Pushy lists what it <b>shipped</b>: releases, merged PRs, commits and top contributors, grouped into a changelog you can copy as Markdown or post as a <b>1200×630 card</b>. It runs <b>in your browser</b>: no account, no backend, no LLM.</p>
+
+    <div class="term">
+      <div class="bar"><i></i><i></i><i></i><span>pushy — what did this repo ship?</span></div>
+      <form class="scanform" id="form" autocomplete="off">
+        <span class="ps">$ pushy ship</span>
+        <input type="text" id="repo" name="repo" placeholder="github.com/owner/repo  (or owner/repo)" aria-label="GitHub repository" spellcheck="false" autocapitalize="off">
+        <button class="btn primary" id="go" type="submit">Show</button>
+      </form>
+    </div>
+
+    <div class="chips" id="windows" role="group" aria-label="Time window"><small>last:</small></div>
+    <div class="chips" id="examples"><small>try:</small></div>
+
+    <details class="tok">
+      <summary>Hit GitHub's rate limit? Add an optional token</summary>
+      <p style="margin:8px 0 0">Anonymous GitHub API access is limited to <b>60 requests/hour per IP</b> (and 10 searches/minute); a Ship Log uses 4 to 7. A token (no scopes needed) raises that to 5,000. It stays in this tab's memory, is sent only to <code>api.github.com</code>, and is never saved.</p>
+      <input type="password" id="token" placeholder="github_pat_… (optional)" autocomplete="off" spellcheck="false" aria-label="Optional GitHub token">
+    </details>
+
+    <div class="always"><b>Automated summary, not an audit.</b> Ship Log reads public GitHub metadata and sorts titles by prefix, label or keyword. It can be wrong or incomplete. It says nothing about code quality or safety. For a risk scan, try <a href="../score/">Pushy Score</a>.</div>
+  </div>
+</header>
+
+<section id="progress" hidden>
+  <div class="wrap">
+    <div class="term"><div class="bar"><i></i><i></i><i></i><span id="progtitle">packing the crates…</span></div>
+      <div class="pbar"><div class="pbar-top"><b id="pbar-msg">Looking around…</b><span id="pbar-n"></span></div><div class="pbar-track done" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="pbar-track"><span id="pbar-fill" style="width:4%"></span></div></div>
+    </div>
+  </div>
+</section>
+
+<section id="error" hidden><div class="wrap" id="errbox"></div></section>
+
+<section id="result" hidden>
+  <div class="wrap">
+    <div class="cardwrap">
+      <div class="cardbox"><canvas id="card" width="1200" height="630" role="img" aria-label="Your ship log card"></canvas></div>
+      <aside class="side" id="side"></aside>
+    </div>
+    <div class="runmeta" id="runmeta"></div>
+    <div class="receipts" id="receipts"></div>
+  </div>
+</section>
+
+<section id="how">
+  <div class="wrap">
+    <h2><span class="c">// </span>How it works</h2>
+    <p class="sub">4 to 7 GitHub API calls and some sorting. No model, no server.</p>
+    <div class="cards">
+      <div class="card"><h3>1. Ask GitHub</h3><p>Reads the repo, its releases, the PRs merged in your window (search API) and the latest 100 commits plus an exact commit count. Results are cached in your browser for 15 minutes, so a refresh costs nothing.</p></div>
+      <div class="card"><h3>2. Sort by type</h3><p>Titles starting with <code>feat:</code>, <code>fix:</code>, <code>docs:</code>, <code>chore:</code> (and friends) are grouped by that prefix. Without one, PR labels and a few plain keywords ("Fix…", "Add…", "Bump…") are used. Everything else lands in "other".</p></div>
+      <div class="card"><h3>3. Share it</h3><p>Copy the changelog as Markdown, download a PNG card, or post on X. Names link to GitHub profiles without @-mentions, so pasting it into an issue pings nobody.</p></div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p class="foot"><b>Automated summary, not an audit · Basic tools are free and never need the token</b></p>
+    <p class="copy">Ship Log is not affiliated with GitHub or any repo owner. Names belong to their owners. Only public data is read, nothing is stored on a server. $FORCEPUSH is a meme coin, NFA.<br><a href="../">← back to $FORCEPUSH</a> · <a href="../score/">Pushy Score</a> · <a href="../roast/">Roast</a> 🐹🔴</p>
+  </div>
+</footer>
+<div class="toast" id="toast" role="status"></div>
+
+<script src="shiplog.js"></script>
+<script src="card.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
