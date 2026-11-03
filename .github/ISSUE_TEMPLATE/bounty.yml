@@ -1,0 +1,50 @@
+name: Bounty submission
+description: Submit work for the Pushy community bounty board (see BOUNTIES.md)
+title: "bounty: "
+labels: ["bounty"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Read [BOUNTIES.md](../blob/main/BOUNTIES.md) first. Payouts are planned at launch, not guaranteed, and the maintainer decision is final. Never post secrets, seed phrases or working exploits here.
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Type
+      options:
+        - New rule
+        - False-positive fix
+        - Risky repo report (already disclosed to the owner)
+        - Tool feature
+    validations:
+      required: true
+  - type: textarea
+    id: summary
+    attributes:
+      label: What are you submitting?
+      description: One short paragraph. Link the PR if you have one.
+    validations:
+      required: true
+  - type: textarea
+    id: proof
+    attributes:
+      label: Proof
+      description: A hit snippet and a benign non-hit for rules, a minimal repro for false positives, or for repo reports a public repo link, the finding with file and line, and the date you told the owner.
+    validations:
+      required: true
+  - type: input
+    id: wallet
+    attributes:
+      label: Solana address for payout (optional now)
+      description: Public address only. Never a seed phrase or private key.
+  - type: checkboxes
+    id: confirm
+    attributes:
+      label: Checklist
+      options:
+        - label: This is my own work and not a duplicate of an open issue.
+          required: true
+        - label: For repo reports, I disclosed to the owner privately first and did not publish secrets or exploits.
+          required: true
+        - label: I understand there is no guaranteed payout and paying or holding $FORCEPUSH never changes a score.
+          required: true

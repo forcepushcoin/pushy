@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Commit Roast Card — get your repo roasted by Pushy | $FORCEPUSH</title>
+<meta name="description" content="Paste a public GitHub repo and get a shareable 1200×630 roast card built from its real commit stats. Free, client-side, no LLM. Just for fun, not a code review.">
+<meta name="theme-color" content="#0d1117">
+<link rel="icon" type="image/jpeg" href="../assets/pp-avatar.jpg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="roast.css">
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="../"><img src="../assets/pp-avatar.jpg" alt="" width="30" height="30">$FORCEPUSH</a>
+    <ul>
+      <li><a href="../">Home</a></li>
+      <li><a href="../score/">Pushy Score</a></li>
+      <li><a href="./" class="on" aria-current="page">Roast</a></li>
+      <li><a href="https://github.com/forcepushcoin/pushy" target="_blank" rel="noopener noreferrer" class="ext">Source</a></li>
+    </ul>
+  </div>
+</nav>
+
+<header class="hero" id="top">
+  <div class="wrap">
+    <h1><span>Commit</span> Roast Card <span class="pill live">v1 · free · for fun</span></h1>
+    <p class="lead">Paste a <b>public GitHub repo</b>. Pushy reads its latest ~300 commits, counts the sins (night pushes, weekend commits, a lot of "fix"), and hands you a <b>1200×630 card</b> to post. It runs <b>in your browser</b>: no account, no backend, no LLM. The stats are real and the jokes are hand-written.</p>
+
+    <div class="term">
+      <div class="bar"><i></i><i></i><i></i><span>pushy — roast a public repo</span></div>
+      <form class="scanform" id="form" autocomplete="off">
+        <span class="ps">$ pushy roast</span>
+        <input type="text" id="repo" name="repo" placeholder="github.com/owner/repo  (or owner/repo)" aria-label="GitHub repository" spellcheck="false" autocapitalize="off">
+        <button class="btn primary" id="go" type="submit">Roast</button>
+      </form>
+    </div>
+
+    <div class="chips" id="examples"><small>try:</small></div>
+
+    <details class="tok">
+      <summary>Hit GitHub's rate limit? Add an optional token</summary>
+      <p style="margin:8px 0 0">Anonymous GitHub API access is limited to <b>60 requests/hour per IP</b>; a roast uses 3 to 5. A token (no scopes needed) raises that to 5,000. It stays in this tab's memory, is sent only to <code>api.github.com</code>, and is never saved.</p>
+      <input type="password" id="token" placeholder="github_pat_… (optional)" autocomplete="off" spellcheck="false" aria-label="Optional GitHub token">
+    </details>
+
+    <div class="always"><b>Just for fun. Not a code review.</b> Pushy roasts a repo's habits, never the people. Scores here mean nothing about code quality. Want a real risk scan? Try <a href="../score/">Pushy Score</a>.</div>
+  </div>
+</header>
+
+<section id="progress" hidden>
+  <div class="wrap">
+    <div class="term"><div class="bar"><i></i><i></i><i></i><span id="progtitle">warming up the grill…</span></div>
+      <div class="pbar"><div class="pbar-top"><b id="pbar-msg">Sniffing around…</b><span id="pbar-n"></span></div><div class="pbar-track done" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="pbar-track"><span id="pbar-fill" style="width:4%"></span></div></div>
+    </div>
+  </div>
+</section>
+
+<section id="error" hidden><div class="wrap" id="errbox"></div></section>
+
+<section id="result" hidden>
+  <div class="wrap">
+    <div class="cardwrap">
+      <div class="cardbox"><canvas id="card" width="1200" height="630" role="img" aria-label="Your roast card"></canvas></div>
+      <aside class="side" id="side"></aside>
+    </div>
+    <div class="runmeta" id="runmeta"></div>
+    <div class="receipts" id="receipts"></div>
+  </div>
+</section>
+
+<section id="how">
+  <div class="wrap">
+    <h2><span class="c">// </span>How it works</h2>
+    <p class="sub">3 to 5 GitHub API calls, some counting, and a big pile of hand-written jokes. No model, no server.</p>
+    <div class="cards">
+      <div class="card"><h3>1. Read the log</h3><p>Fetches the repo, its latest commits (up to 300, in pages of 100) and the contributor list. Results are cached in your browser for 15 minutes, so a refresh costs nothing.</p></div>
+      <div class="card"><h3>2. Count the sins</h3><p>Night and weekend commits, one-word messages, "fix", "oops" and revert counts, emoji, streaks, busiest hour and day, average message length and bus factor. GitHub reports commit times in <b>UTC</b>, so "night" means 00:00–04:59 UTC unless you shift the clock.</p></div>
+      <div class="card"><h3>3. Pick the jokes</h3><p>A deterministic template system chooses an archetype and a few lines based on the numbers. Same repo, same roast, so links are shareable. Hit "Reroll" for another take. Download the PNG or post it.</p></div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p class="foot"><b>Just for fun. Not a code review. $FORCEPUSH is a meme coin, NFA.</b></p>
+    <p class="copy">Commit Roast Card is not affiliated with GitHub or any repo owner. Names belong to their owners. Only public data is read, nothing is stored on a server.<br><a href="../">← back to $FORCEPUSH</a> · <a href="../score/">Pushy Score</a> 🐹🔴</p>
+  </div>
+</footer>
+<div class="toast" id="toast" role="status"></div>
+
+<script src="roast.js"></script>
+<script src="card.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

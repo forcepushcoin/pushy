@@ -201,10 +201,14 @@ Automated scan, not an audit · Pushy needs no token
 | --- | --- |
 | Pushy Score | Live |
 | Pushy GitHub Action | Live |
+| [Commit Roast Card](roast/) | Live |
 | AI deep scan | Building |
-| Commit Roast Card | Planned |
 | Ship Log | Planned |
 | Rescue | Planned |
+
+**[Commit Roast Card](roast/)** (`roast/`): paste a public repo, get a funny, Pushy-voiced roast of its commit habits and a shareable 1200×630 card. Free, client-side, no backend, no account. Just for fun, not a code review. Live at <https://forcepushcoin.github.io/roast/>.
+
+**[Bounties](BOUNTIES.md)** are planned at launch. The bounty wallet does not exist yet, so nothing is payable today.
 
 ## Limitations
 
@@ -233,7 +237,9 @@ Pushy Score is not affiliated with GitHub, Anthropic, or any scanner vendor.
 | Path | What it is |
 | --- | --- |
 | [`score/`](score/) | Pushy Score v1.1. Open `index.html` via a local server. |
+| [`roast/`](roast/) | Commit Roast Card. Open `index.html` via a local server. |
 | [`action.yml`](action.yml) | GitHub Action. `uses: forcepushcoin/pushy@v1`. |
+| [`BOUNTIES.md`](BOUNTIES.md) | Bounty board rules. Payouts are planned at launch. |
 | [`assets/`](assets/) | `pp-avatar.jpg` (mascot on the scanner and at the top of this page) and `pp.jpg` (the same hamster on a CRT). |
 | [`docs/RULES.md`](docs/RULES.md) | Every rule id, severity, category, and description. |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | How to add a rule, with a test and false-positive guidance. |
