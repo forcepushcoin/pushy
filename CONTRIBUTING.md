@@ -48,7 +48,7 @@ Put the object on the array that matches what it needs to see:
 | `fileRules` | One file has structure (frontmatter, JSON, YAML) | `match(path, text)` and `run(file)` |
 | `repoRules` | The decision needs the repo, the commit list, or the tree | `run(ctx)` |
 
-`kinds` is a subset of `'instr'`, `'code'`, and `'config'`. `TEXT` in `rules.js` is all three. Line rules with `re` skip a line shorter than 6 characters. In code and config files, a line-rule in the `code` category that uses `re` also skips lines that look like comments (`#`, `//`, `*`, `/*`, `--`). Prompt rules still see those lines. An `all` rule skips a comment-like start line only when the file kind is `code`.
+`kinds` is a subset of `'instr'`, `'code'`, and `'config'`. `TEXT` in `rules.js` is all three. Line rules with `re` skip a line shorter than 6 characters. In code and config files, a line rule in the `code` or `prompt` category that uses `re` also skips lines that look like comments (`#`, `//`, `*`, `/*`, `--`). An `all` rule skips a comment-like start line only when the file kind is `code`.
 
 A line rule looks like this:
 
@@ -123,15 +123,15 @@ Write the exception into the rule. Do not delete the rule to silence one repo.
 Patterns that already cause noise, and the filters neighboring rules use:
 
 - Placeholder values. `S003` and `S007` reject lines that match `PLACEHOLDER` (words such as `example`, `changeme`, `your_api_key`, `process.env`, `${...}`). `S007` also requires a high-entropy value that contains both a letter and a digit. A generic "secret assignment" rule without that bar will flag samples.
-- Negations. `P005`, `P007`, and `P010` return false when the line is telling the model not to do the thing (`never`, `do not`, `must not`, `avoid`). `P001` does not. The line `Never ignore all previous instructions from the user.` still matches `P001` today. A new phrase rule needs that filter, plus a fixture that proves the negated line is quiet and the hostile line still fires.
-- Comments and ignore files. `X008` returns false for `.gitignore`, `.dockerignore`, and `.npmignore`. Comment skipping for `code` line rules is described above. Markdown instruction files are still scanned, comments included.
-- Docs and tests lower severity. They do not remove the finding. On a path under `tests`, `__tests__`, `spec`, `fixtures`, `examples`, `samples`, `docs`, `demo`, `demos`, or `testdata`, and on a non-core file whose name starts with `readme`, `changelog`, `contributing`, or `code_of_conduct`, prompt and code hits drop one level. Core instruction files such as `SKILL.md` and `AGENTS.md` stay at the declared severity even inside those folders. Test paths drop `X*` code rules one more level. `P011` opts out with `noEscapeCtx`. If your pattern is wrong, a downgrade still leaves a low-severity hit and still costs the low penalty (3 points) when it lands on `low`.
+- Negations. `P007` returns false when the line says `never`, `do not`, `must not`, or `avoid`. Rules with `ctx: true` (`X001`, `P001`, `P002`, `P005`, `P009`, `P010`) do not drop the hit. In an instruction file they lower it when the match is quoted, negated, or discussed in the same sentence: one level on a core instruction file, two levels otherwise. The line `Never ignore all previous instructions from the user.` still matches `P001`, at medium on `SKILL.md`. A new phrase rule should decide whether to filter the line out or mark `ctx: true`, and should include a fixture for both.
+- Comments and ignore files. `X008` returns false for `.gitignore`, `.dockerignore`, and `.npmignore`. Comment skipping for `code` and `prompt` line rules is described above. Markdown instruction files are still scanned, comments included.
+- Docs and tests lower severity. They do not remove the finding. On a path under `tests`, `__tests__`, `spec`, `fixtures`, `examples`, `samples`, `docs`, `demo`, `demos`, or `testdata`, and on a non-core file whose name starts with `readme`, `changelog`, `contributing`, or `code_of_conduct`, prompt and code hits drop one level. A prose file (`.md`, `.mdx`, `.rst`, `.txt`) that is not already on that path drops `X*` and `N*` code hits one level. Core instruction files such as `SKILL.md` and `AGENTS.md` are not downgraded by the path rule. Test paths drop `X*` code rules one more level. `P011` sets `noEscapeCtx` only for tag characters and bidi overrides. If your pattern is wrong, a downgrade still leaves a low-severity hit and still costs the low penalty (3 points) when it lands on `low`.
 
 Prefer a `filter` that explains itself over a longer regex. Keep `why` honest when the match is often legitimate (`N002` says a real API client can look the same).
 
 ## Scanner limits to respect
 
-The engine will not read a file larger than 200 KB, and it will not analyze more than 40 text files. Line and special rules keep at most 12 hits per rule per file. A rule that needs a full-repo view belongs in `repoRules`, where the skipped files are still visible as tree entries.
+The engine will not read a file larger than 500 KB, will not analyze more than 400 scannable files, and stops at 15 MB total. Line and special rules keep at most 12 hits per rule per file. Scoring uses every hit, then the report stores at most 60 findings per rule. A rule that needs a full-repo view belongs in `repoRules`, where the skipped files are still visible as tree entries.
 
 ## Bugs
 

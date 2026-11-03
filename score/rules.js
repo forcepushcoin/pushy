@@ -6,12 +6,13 @@
  * Changing a rule, severity or weight => bump RULESET.version and add a line to CHANGELOG below.
  *
  * CHANGELOG
+ *   1.1.0 (2026-11-03)  full-repo scans (400 files / 15 MB budget, 500 KB per file); lower severity of code findings in test/fixture/example paths; skip comment-only lines for code rules; per-rule storage cap; misc false-positive fixes.
  *   1.0.0 (2026-11-03)  first public ruleset: secrets, code/network, prompt hygiene, docs & upkeep.
  */
 (function (root) {
   'use strict';
 
-  var RULESET = { id: 'pushy-rules', version: '1.0.0', date: '2026-11-03' };
+  var RULESET = { id: 'pushy-rules', version: '1.1.0', date: '2026-11-03' };
 
   /* ---------- scoring knobs ---------- */
   var SCORING = {
@@ -51,10 +52,12 @@
 
   /* ---------- scan limits ---------- */
   var LIMITS = {
-    maxFiles: 40,
-    maxFileBytes: 200 * 1024,
+    maxFiles: 400,                    // scannable files per scan
+    maxFileBytes: 500 * 1024,         // per-file cap (text)
+    maxTotalBytes: 15 * 1024 * 1024,  // total download budget
     maxFindingsPerRulePerFile: 12,
-    fetchConcurrency: 6
+    maxFindingsPerRule: 60,           // stored hits per rule across the repo (count is still reported)
+    fetchConcurrency: 10
   };
 
   /* ---------- file classification tables (used by the engine) ---------- */
@@ -111,6 +114,7 @@
    *    re: tested per line · all/within: two patterns within N lines
    *    kinds: which file kinds · sev: severity before example-path downgrade
    * ===================================================================== */
+  var TRUSTED_API = /https?:\/\/(?:[\w-]+\.)*(?:anthropic\.com|openai\.com|github\.com|githubusercontent\.com|googleapis\.com|google\.com|stripe\.com|slack\.com|npmjs\.org|pypi\.org|azure\.com|microsoft\.com|amazonaws\.com|cloudflare\.com|atlassian\.(?:com|net)|notion\.com|linear\.app|discord\.com|twilio\.com|sendgrid\.com|huggingface\.co|mistral\.ai|cohere\.(?:com|ai)|groq\.com|x\.ai|openrouter\.ai)\b/i;
   var lineRules = [
 
     /* ---------------- SECRETS ---------------- */
@@ -169,7 +173,7 @@
       fix: 'Never commit keypairs or seed phrases. Use a hardware wallet or a scoped signer, and keep keys outside the repo.' },
 
     /* ---------------- CODE: dangerous execution ---------------- */
-    { id: 'X001', cat: 'code', sev: 'high', kinds: TEXT,
+    { id: 'X001', ctx: true, cat: 'code', sev: 'high', kinds: TEXT,
       title: 'Pipes a download straight into a shell',
       re: /(?:\b(?:curl|wget)\b[^\n|]*\|\s*(?:sudo\s+)?(?:ba|z|da|k)?sh\b|\b(?:iwr|irm|Invoke-WebRequest|Invoke-RestMethod)\b[^\n|]*\|\s*(?:iex|Invoke-Expression)\b|\biex\s*\(\s*(?:New-Object|iwr|irm))/i,
       why: 'curl | sh runs whatever the server sends at that moment, with your permissions, with no review.',
@@ -184,11 +188,16 @@
       re: /(?:^|[^\w.$])eval\s*\(|\bnew\s+Function\s*\(|\bvm\.(?:runIn\w+|Script)\b|\bsetTimeout\s*\(\s*["'`]/,
       why: 'Running strings as code lets untrusted text become a command.',
       fix: 'Use JSON.parse or an explicit dispatch table. Never pass model or network output to eval.' },
-    { id: 'X004', cat: 'code', sev: 'medium', kinds: ['code'],
+    { id: 'X004', oncePerFile: true, cat: 'code', sev: 'medium', kinds: ['code'],
       title: 'Spawns a shell / subprocess',
-      re: /\bsubprocess\.(?:run|call|Popen|check_output|check_call)\b[^\n]*shell\s*=\s*True|\bos\.(?:system|popen)\s*\(|\bchild_process\b|\b(?:execSync|execFileSync|spawnSync)\s*\(|(?:^|[^\w.])exec\s*\(\s*[`"'][^`"']*\$\{|\bRuntime\.getRuntime\(\)\.exec\b|\bsystem\s*\(\s*\$/,
+      re: /\bsubprocess\.(?:run|call|Popen|check_output|check_call)\b[^\n]*shell\s*=\s*True|\bos\.(?:system|popen)\s*\(|\bexecSync\s*\(|\b(?:spawn|spawnSync|execFile|execFileSync)\s*\([^\n]*\bshell\s*:\s*true|(?:^|[^\w.])exec\s*\(\s*[`"'][^`"']*\$\{|\bRuntime\.getRuntime\(\)\.exec\b|\bsystem\s*\(\s*\$/,
       why: 'Shell access is the most powerful thing a tool can have. If arguments come from a model, an attacker can steer it.',
       fix: 'Avoid the shell, pass argument arrays (no shell=True), validate inputs against an allow-list, and document why the tool needs it.' },
+    { id: 'X012', oncePerFile: true, cat: 'code', sev: 'info', kinds: ['code'],
+      title: 'Runs subprocesses (argument arrays, no shell)',
+      re: /\b(?:spawn|spawnSync|execFile|execFileSync)\s*\(|\bsubprocess\.(?:run|call|Popen|check_output|check_call)\s*\(|\bProcessBuilder\b|\bexec\.Command\s*\(/,
+      why: 'Argument-array subprocess calls are the safer pattern, but the program still runs commands on your machine.',
+      fix: 'Make sure the command and arguments cannot be steered by untrusted text, and document what is run.' },
     { id: 'X005', cat: 'code', sev: 'high', kinds: TEXT,
       title: 'Destructive or system-level command',
       re: /\brm\s+-[a-zA-Z]*[rR][a-zA-Z]*f?[a-zA-Z]*\s+(?:\/(?!\w)|~\/?(?:\s|$)|\$HOME\b|\*\s*$|\/\*)|\bchmod\s+(?:-R\s+)?[0-7]?777\b|\bmkfs(?:\.\w+)?\s|\bdd\s+if=[^\n]*\bof=\/dev\/|:\(\)\s*\{\s*:\|:&\s*\};:|\bformat\s+[a-z]:\s*\/|\bRemove-Item\b[^\n]*-Recurse[^\n]*-Force[^\n]*[A-Z]:\\/i,
@@ -237,9 +246,10 @@
       why: 'These services are where stolen data tends to go: anonymous, instant, throw-away.',
       fix: 'Remove the endpoint, or document exactly what is sent and why, and let the user turn it off.' },
     { id: 'N002', cat: 'code', sev: 'high', kinds: TEXT,
-      all: [/\b(?:fetch|axios|requests?\.(?:post|put|get)|http\.client|urllib|curl|wget|XMLHttpRequest|got\(|httpx|aiohttp|WebClient|Invoke-(?:WebRequest|RestMethod)|iwr|irm)\b/i,
-            /(?:process\.env\b(?!\.(?:NODE_ENV|PORT|HOST|DEBUG|LOG_LEVEL)\b)|os\.environ(?!\.get\(\s*["'](?:PORT|HOST|DEBUG|LOG_LEVEL|HOME|PATH)["'])|\bgetenv\s*\(|\$\{?[A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD)[A-Z0-9_]*\}?|\.ssh\b|\.aws\b|\bid_rsa\b|\bDump-Env\b)/],
+      all: [/\b(?:fetch\s*\(|axios(?:\.\w+)?\s*\(|requests?\.(?:post|put|get|request)\s*\(|http\.client\b|urllib\.request\b|curl\b|wget\b|XMLHttpRequest|\bgot\s*[.(]|httpx\.\w+\s*\(|aiohttp\b|WebClient\b|Invoke-(?:WebRequest|RestMethod)|\biwr\b|\birm\b)/i,
+            /(?:(?:process\.env\.|os\.environ(?:\.get)?[\[(]\s*["'])[A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSW(?:OR)?D|CREDENTIAL|AUTH)[A-Z0-9_]*|\bos\.getenv\(\s*["'][A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSW(?:OR)?D|CREDENTIAL|AUTH)|JSON\.stringify\(\s*process\.env\b|\b(?:data|json|body|params|payload|headers)\s*[=:]\s*(?:dict\()?(?:process\.env|os\.environ)\b|\bObject\.(?:entries|keys|values|assign)\(\s*process\.env\b|\$\{?[A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD)[A-Z0-9_]*\}?|\.ssh\b|\.aws\b|\bid_rsa\b|\bDump-Env\b)/],
       within: 3,
+      filter: function (m, line, ctx) { return !TRUSTED_API.test(ctx && ctx.win || ''); },
       title: 'Network call near environment variables or secrets',
       why: 'A request that sits next to env vars or key files may be shipping secrets out. Legit API clients do this too, so check.',
       fix: 'Send only what the API needs, never the whole environment, and name the destination in the docs.' },
@@ -255,19 +265,20 @@
       fix: 'Switch to https:// or document why plain HTTP is required.' },
 
     /* ---------------- PROMPT HYGIENE ---------------- */
-    { id: 'P001', cat: 'prompt', sev: 'high', kinds: TEXT,
+    { id: 'P001', ctx: true, cat: 'prompt', sev: 'high', kinds: TEXT,
       title: 'Instruction-override phrase',
       re: /\b(?:ignore|disregard|forget|override)\s+(?:all\s+|any\s+|the\s+|your\s+|of\s+)*(?:previous|prior|above|earlier|preceding|system|safety|original)\s+(?:instructions?|prompts?|rules|guidelines|directions|messages?|constraints)\b|\byou\s+are\s+now\s+(?:in\s+)?(?:DAN|developer\s+mode|jailbroken|unrestricted)\b|\bnew\s+(?:system\s+)?instructions?\s*:\s*(?:ignore|you\s+must)/i,
       why: 'Text that tells the model to drop its earlier rules is the textbook prompt-injection payload.',
       fix: 'Delete it. If this is a security example, move it into a clearly-marked test fixture.' },
-    { id: 'P002', cat: 'prompt', sev: 'high', kinds: TEXT,
+    { id: 'P002', ctx: true, cat: 'prompt', sev: 'high', kinds: TEXT,
       title: 'Tells the model to hide things from the user',
       re: /\b(?:do\s+not|don'?t|never)\s+(?:tell|inform|mention|reveal|show|notify|alert|warn)\s+(?:this\s+to\s+)?(?:the\s+)?user\b|\bwithout\s+(?:telling|informing|notifying|alerting)\s+the\s+user\b|\bwithout\s+(?:the\s+)?user'?s?\s+(?:knowledge|consent|approval|confirmation|awareness)\b|\bhide\s+this\s+(?:from|action)\b|\bsilently\s+(?:send|upload|post|run|execute|forward|exfiltrate|delete)\b|\bkeep\s+this\s+(?:a\s+)?secret\s+from\b/i,
+      filter: function (m, line) { var tail = line.slice(m.index + m[0].length, m.index + m[0].length + 40); return !/^\s+(?:that\s+)?(?:they|he|she)\s+(?:need|should|must|have|can|could|may|might|are|were|don'?t)\b|^\s+(?:what|how|which|to\s+(?:adopt|install|change|restructure|use|switch))\b/i.test(tail); },
       why: 'Legit tools tell the user what they do. Hidden actions are how "tool poisoning" attacks work.',
       fix: 'Remove the concealment. Surface every side effect to the user and ask before sensitive actions.' },
     { id: 'P003', cat: 'prompt', sev: 'high', kinds: TEXT,
       title: 'Hidden-instruction block (<IMPORTANT>, <system>, [SYSTEM])',
-      re: /<\s*(?:important|system|instructions?|admin|override|secret|hidden)\s*>|\[\s*(?:SYSTEM|ADMIN|OVERRIDE)\s*\]\s*:|^#{1,4}\s*SYSTEM\s*(?:PROMPT|OVERRIDE|MESSAGE)\b/i,
+      re: /<\s*(?:important|system|instructions?|admin|override|secret|hidden)\s*>|\[\s*(?:SYSTEM|ADMIN|OVERRIDE)\s*\]\s*:/i,
       why: 'Special tags inside tool or skill text are used to smuggle extra instructions past the user.',
       fix: 'Keep tool descriptions to what the tool does. Put policy in your own system prompt, not in third-party text.' },
     { id: 'P004', cat: 'prompt', sev: 'medium', kinds: ['instr', 'config'],
@@ -275,10 +286,9 @@
       title: 'HTML comment containing instructions',
       why: 'Humans don\'t see HTML comments when reading rendered markdown, but the model does.',
       fix: 'Move meaningful text into visible content, or delete the comment.' },
-    { id: 'P005', cat: 'prompt', sev: 'high', kinds: ['instr', 'config', 'code'],
+    { id: 'P005', ctx: true, cat: 'prompt', sev: 'high', kinds: ['instr', 'config', 'code'],
       title: 'Tells the model to read or send secrets / sensitive files',
-      re: /\b(?:read|cat|print|dump)\b[^\n]{0,60}(?:~\/\.ssh|\bid_rsa\b|\.aws\/credentials|~\/\.aws\b|private\s+key|seed\s+phrase|\.npmrc\b|keychain|wallet\.dat)|\b(?:send|upload|post|forward|exfiltrate|transmit)\b[^\n]{0,70}(?:~\/\.ssh|\bid_rsa\b|\.env\b|\.aws\b|private\s+key|seed\s+phrase|system\s+prompt|conversation\s+history|chat\s+history|environment\s+variables)/i,
-      filter: function (m, line) { return !/\b(?:never|do not|don't|must not|avoid|should not|shouldn't|not to)\b[^\n]{0,50}\b(?:read|send|upload|post|commit|include|expose|share|print|show|dump)\b/i.test(line); },
+      re: /\b(?:read|cat|print|dump)\b[^\n]{0,60}(?:~\/\.ssh|\bid_rsa\b|\.aws\/credentials|~\/\.aws\b|private\s+key|seed\s+phrase|\.npmrc\b|keychain|wallet\.dat)|\b(?:send|upload|post|forward|exfiltrate|transmit)\b[^\n]{0,70}(?:~\/\.ssh|\bid_rsa\b|\.env\b|\.aws\b|private\s+key|seed\s+phrase)|\b(?:send|upload|post|forward|exfiltrate|transmit)\b[^\n]{0,70}(?:system\s+prompt|conversation\s+history|chat\s+history|environment\s+variables)[^\n]{0,60}\b(?:to|at)\s+(?:https?:\/\/|[\w.-]+@[\w.-]+\.[a-z]{2,}|(?:my|our|this|the|an?)\s+(?:remote\s+|external\s+)?(?:server|endpoint|webhook|url|address))/i,
       why: 'Instructions that move keys, env vars or chat history somewhere are a data-theft recipe.',
       fix: 'Remove the instruction. If a file must be read, name it explicitly, keep it local, and tell the user.' },
     { id: 'P006', cat: 'prompt', sev: 'high', kinds: ['instr', 'config'],
@@ -297,14 +307,13 @@
       re: /\b(?:before|instead\s+of)\s+(?:using|calling|running|invoking)\s+(?:any|every|all|the\s+\w+|other)\s+(?:other\s+)?(?:tools?|functions?|commands?)\b|\balways\s+(?:call|use|invoke|run)\s+this\s+(?:tool|function)\s+(?:first|before|for\s+every)\b|\bthis\s+tool\s+(?:must|should)\s+be\s+(?:called|used|invoked)\s+(?:first|before|for\s+every|on\s+every)/i,
       why: 'A tool that tells the model to prefer it over others can hijack traffic meant for other tools.',
       fix: 'Describe what the tool does, not when it outranks other tools.' },
-    { id: 'P009', cat: 'prompt', sev: 'medium', kinds: ['instr', 'config'],
-      re: /\b(?:system|admin(?:istrator)?|developer|anthropic|openai|platform)\s+(?:override|message|instruction|command|directive|notice)\s*[:\-—]/i,
+    { id: 'P009', ctx: true, cat: 'prompt', sev: 'medium', kinds: ['instr', 'config'],
+      re: /\b(?:system|admin(?:istrator)?|developer|anthropic|openai|platform)\s+(?:override|message|instruction|command|directive|notice)\s*[:—]\s/i,
       title: 'Claims authority ("system override:", "admin instruction:")',
       why: 'Pretending to be the platform or the developer is social engineering aimed at the model.',
       fix: 'Remove authority claims. Third-party text has no special authority.' },
-    { id: 'P010', cat: 'prompt', sev: 'medium', kinds: ['instr', 'config', 'code'],
-      re: /(?:--dangerously-skip-permissions|--yolo\b|\bbypassPermissions\b|\bdangerously[A-Z][A-Za-z]*\b|\bauto[- ]?approve\b|\bdo\s+not\s+ask\s+(?:for\s+)?(?:permission|confirmation|approval)\b|\bskip\s+(?:all\s+)?(?:confirmation|approval|permission)s?\b)/i,
-      filter: function (m, line) { return !/\b(?:never|don't|do not|must not|avoid|disable)\b[^\n]{0,30}(?:skip|bypass|dangerously)/i.test(line); },
+    { id: 'P010', ctx: true, cat: 'prompt', sev: 'medium', kinds: ['instr', 'config', 'code'],
+      re: /(?:--dangerously-skip-permissions|--yolo\b|\bbypassPermissions\b|\bdangerously[A-Z][A-Za-z]*\b|--auto-?approve\b|\bauto[- ]?approve\s+(?:all|every|everything|any|without)\b|\bautoApprove\s*[:=]\s*true\b|\bdo\s+not\s+ask\s+(?:for\s+)?(?:permission|confirmation|approval)\b|\bskip\s+(?:all\s+)?(?:confirmation|approval|permission)s?\b)/i,
       title: 'Asks to skip permission prompts',
       why: 'Skipping the human-in-the-loop turns every other bug into a full compromise.',
       fix: 'Keep confirmations on for anything that writes, deletes, spends or sends.' }
@@ -351,10 +360,10 @@
           if (!tag && !bidi && !zw) return;
           var found = (s.match(/[\u202A-\u202E\u2066-\u2069\u200B\u200C\u2060-\u2064\u180E\u200E\u200F\u00AD\uFEFF]|[\u{E0000}-\u{E007F}]/gu) || []).join('');
           total += found.length;
-          var sev = tag ? 'critical' : bidi ? 'high' : 'medium';
+          var onlyBom = /^\uFEFF+$/.test(found); var sev = tag ? 'critical' : bidi ? 'high' : onlyBom ? 'low' : 'medium';
           var note = tag ? 'Unicode tag characters (invisible ASCII smuggling)' : bidi ? 'bidirectional override characters' : 'zero-width / invisible characters';
           var hidden = tag ? decodeTags(found) : '';
-          out.push({ line: i + 1, sev: sev, snippet: note + ': ' + cps(found) + (hidden ? '  → hidden text: "' + hidden.slice(0, 120) + '"' : ''), noEscapeCtx: true });
+          out.push({ line: i + 1, sev: sev, snippet: note + ': ' + cps(found) + (hidden ? '  → hidden text: "' + hidden.slice(0, 120) + '"' : ''), noEscapeCtx: !!(tag || bidi) });
         });
         return out;
       } },
@@ -368,6 +377,7 @@
           if (l.length < 100) return;
           if (/data:[a-z]+\/[a-z0-9.+-]+;base64|sha(?:256|384|512)-|integrity|-----BEGIN|\.(?:png|jpg|gif|svg)\b/i.test(l)) return;
           var re = /[A-Za-z0-9+\/]{100,}={0,2}/g, m;
+          if (/(?:iVBORw0KGgo|\/9j\/4AAQ|R0lGODlh|R0lGODdh|UklGR|AAABAAEA)[A-Za-z0-9+\/]{60,}/.test(l)) return; // inline PNG/JPEG/GIF/WebP/ICO data
           while ((m = re.exec(l))) {
             var b = m[0];
             if (!/[a-z]/.test(b) || !/[A-Z]/.test(b) || !/[0-9]/.test(b)) continue;
@@ -616,7 +626,7 @@
     'No LLM or human reads the instructions, so pure social engineering ("please download and run this helper") is only caught when it matches a rule.',
     'Links and docs a skill points to are never fetched. A page that is clean today can serve different instructions after you trust it.',
     'Binaries, archives, .pyc bytecode, office documents and images are not opened. Text hidden inside them is invisible to this scan.',
-    'Only the files listed as analyzed were read (max 40, max 200 KB each). Everything else is unchecked.',
+    'Only the files listed as analyzed were read (budget: 400 files, 15 MB total, 500 KB per file). Anything over budget or that failed to download is listed as not analyzed and caps the score.',
     'Dependencies are not scanned for known vulnerabilities or malware, and nothing is executed or sandboxed.',
     'Only the latest commit on the default branch is read. Other branches, tags, history, and future pushes are not covered.',
     'A high score means "no rule fired", not "safe". Read the code before you install or run anything.'

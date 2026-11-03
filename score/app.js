@@ -37,6 +37,23 @@
   function logAdd(msg, cls) { logLines.push('<span class="' + (cls || 'd') + '">' + esc(msg) + '</span>'); $('log').innerHTML = logLines.join('\n') + '\n<span class="cur"></span>'; }
   function show(id) { ['progress', 'error', 'result'].forEach(function (x) { $(x).hidden = (x !== id); }); if (id === 'result') $('result').hidden = false; }
 
+  /* ---- live progress bar (throttled to animation frames so the page stays responsive) ---- */
+  var FLAVOUR = [[0, 'Sniffing around the repo…'], [0.12, 'Hamster is reading the fine print…'], [0.35, 'Checking for hidden Unicode and sneaky curl | sh…'], [0.6, 'Squinting at network calls…'], [0.85, 'Almost there. Do not push yet…']];
+  var pg = { n: 0, tot: 0, path: '', bytes: 0, raf: 0, t0: 0 };
+  function progReset() { pg = { n: 0, tot: 0, path: '', bytes: 0, raf: 0, t0: Date.now() }; $('pbar').hidden = false; $('pbar-track').classList.remove('done'); $('pbar-fill').style.width = '2%'; $('pbar-msg').textContent = FLAVOUR[0][1]; $('pbar-n').textContent = ''; $('pbar-sub').textContent = ''; $('progtitle').textContent = 'scanning…'; }
+  function progPaint() {
+    pg.raf = 0; var f = pg.tot ? pg.n / pg.tot : 0, msg = FLAVOUR[0][1];
+    FLAVOUR.forEach(function (x) { if (f >= x[0]) msg = x[1]; });
+    $('pbar-fill').style.width = Math.max(2, Math.round(f * 100)) + '%'; $('pbar-track').setAttribute('aria-valuenow', Math.round(f * 100));
+    $('pbar-msg').textContent = msg; $('pbar-n').textContent = 'Scanning ' + pg.n + '/' + pg.tot + ' files…';
+    $('pbar-sub').textContent = pg.path + ' · ' + Math.round(pg.bytes / 1024).toLocaleString('en-US') + ' KB read · ' + ((Date.now() - pg.t0) / 1000).toFixed(1) + ' s';
+  }
+  function progFile(n, tot, p, bytes) { pg.n = n; pg.tot = tot; pg.path = p; pg.bytes = bytes; if (!pg.raf) pg.raf = (window.requestAnimationFrame || setTimeout)(progPaint); }
+  function progDone() { if (pg.raf) { try { cancelAnimationFrame(pg.raf); } catch (e) {} } progPaint(); $('pbar-fill').style.width = '100%'; $('pbar-track').classList.add('done'); $('pbar-msg').textContent = 'Done. Verdict incoming…'; $('progtitle').textContent = 'done'; }
+
+  /* ---- compact disclaimer toggle ---- */
+  $('mdtoggle').addEventListener('click', function () { var u = $('mdfull'), open = u.hidden; u.hidden = !open; this.setAttribute('aria-expanded', open); this.textContent = open ? 'hide' : 'details'; });
+
   /* ---- cache ---- */
   function ckey(p) { return 'pushy:' + R.RULESET.version + ':' + p.owner.toLowerCase() + '/' + p.repo.toLowerCase() + '|' + (p.refSegments || []).join('/'); }
   function cget(p) { try { var v = JSON.parse(localStorage.getItem(ckey(p))); if (v && Date.now() - v.t < CACHE_MIN * 60000) return v; } catch (e) {} return null; }
@@ -52,14 +69,15 @@
     try { history.replaceState(null, '', '?repo=' + encodeURIComponent(input.trim())); } catch (e) {}
     var cached = !force && cget(parsed);
     if (cached) { render(cached.rep, { cachedAt: cached.t }); finish(); return; }
-    show('progress'); logReset(); logAdd('$ pushy scan ' + input.trim(), 'ok');
+    show('progress'); logReset(); progReset(); logAdd('$ pushy scan ' + input.trim(), 'ok');
     try {
       var rep = await P.scan(parsed, {
         token: ($('token').value || '').trim() || null,
         onProgress: function (m) { logAdd('→ ' + m); },
-        onFile: function (n, tot, p) { if (n === tot || n % 10 === 0) logAdd('   read ' + n + '/' + tot + ' files'); }
+        onFile: function (n, tot, p, bytes, budget) { progFile(n, tot, p, bytes); }
       });
-      logAdd('✓ done: ' + rep.score + '/100', 'ok');
+      progDone();
+      logAdd('✓ done: ' + rep.score + '/100 in ' + (rep.stats.fetchMs / 1000).toFixed(1) + ' s (' + rep.stats.apiCalls + ' GitHub API calls)', 'ok');
       cset(parsed, rep);
       render(rep, {});
     } catch (e) { showError(e); }
@@ -104,7 +122,7 @@
       '<div class="meta"><span><a href="' + esc(r.url) + '" target="_blank" rel="noopener noreferrer">' + esc(where) + '</a></span><span>commit <a href="' + esc(r.url + '/commit/' + rep.sha) + '" target="_blank" rel="noopener noreferrer">' + esc(rep.shortSha) + '</a></span><span>' + esc(rep.scoreDay) + '</span><span>ruleset v' + esc(rep.ruleset.version) + '</span>' +
       (r.stars != null ? '<span>★ ' + esc(r.stars) + '</span>' : '') + '</div>' +
       (rep.capped ? '<div class="capnote"><b>Score capped:</b> raw score was ' + rep.rawScore + ', limited to ' + rep.score + ' because:<ul>' + rep.caps.filter(function (c) { return c.value <= rep.score; }).map(function (c) { return '<li>' + esc(c.reason) + '</li>'; }).join('') + '</ul></div>' : '') +
-      '<div class="disc-inline">Automated scan, not an audit or guarantee.' + (o.cachedAt ? ' · cached result from ' + Math.max(0, Math.round((Date.now() - o.cachedAt) / 60000)) + ' min ago · <a href="#" id="rescan">rescan</a>' : '') + (rep.rate && rep.rate.remaining != null ? ' · GitHub API budget left: ' + rep.rate.remaining + '/' + rep.rate.limit : '') + '</div>' +
+      '<div class="disc-inline">Automated scan, not an audit or guarantee.' + (o.cachedAt ? ' · cached result from ' + Math.max(0, Math.round((Date.now() - o.cachedAt) / 60000)) + ' min ago · <a href="#" id="rescan">rescan</a>' : '') + (rep.stats ? ' · ' + rep.coverage.analyzed + ' files in ' + (rep.stats.fetchMs / 1000).toFixed(1) + ' s · ' + rep.stats.apiCalls + ' API calls' : '') + (rep.rate && rep.rate.remaining != null ? ' · GitHub API budget left: ' + rep.rate.remaining + '/' + rep.rate.limit : '') + '</div>' +
       '</div></div>';
 
     // sub-scores
@@ -117,10 +135,12 @@
 
     // blind spots (mandatory)
     var cov = rep.coverage, notAn = rep.skipped, so = rep.skippedOther;
+    var overBudget = notAn.some(function (s) { return /^(over the|too large)/.test(s.reason); }), dlFail = notAn.filter(function (s) { return /could not be downloaded/.test(s.reason); }).length;
     h += '<div class="panel blind" id="blind"><h2>⚠ Blind spots — read this</h2>' +
-      '<div>Pushy analyzed <b>' + cov.analyzed + '</b> of <b>' + cov.relevantTotal + '</b> scannable files (' + cov.totalFiles + ' files in scope). ' + (cov.skippedCounted ? '<b>' + cov.skippedCounted + ' scannable file(s) were NOT analyzed.</b>' : 'No scannable files were skipped.') + (cov.treeTruncated ? ' <b>GitHub truncated the file tree: some files were never listed.</b>' : '') + '</div>' +
+      '<div>Pushy analyzed <b>' + cov.analyzed + '</b> of <b>' + cov.relevantTotal + '</b> scannable files (' + cov.totalFiles + ' files in scope). ' + (cov.skippedCounted ? '<b>' + cov.skippedCounted + ' scannable file(s) were NOT analyzed.</b>' : 'Every scannable file was read.') + (rep.skipped.length - cov.skippedCounted ? ' ' + (rep.skipped.length - cov.skippedCounted) + ' binary / archive file(s) were not opened.' : '') + (cov.treeTruncated ? ' <b>GitHub truncated the file tree: some files were never listed.</b>' : '') + '</div>' +
       '<ul>' + rep.blindSpots.map(function (b) { return '<li>' + esc(b) + '</li>'; }).join('') + '</ul>' +
-      (cov.skippedCounted && !rep.subpath ? '<div class="tip">Tip: scan a sub-folder for full coverage, e.g. <code>github.com/' + esc(r.owner + '/' + r.name) + '/tree/' + esc(rep.ref) + '/&lt;folder&gt;</code>.</div>' : '') +
+      (overBudget && !rep.subpath ? '<div class="tip">This repo is over the scan budget (' + cov.budget.files + ' files / ' + Math.round(cov.budget.bytes / 1048576) + ' MB). Scan a sub-folder for full coverage, e.g. <code>github.com/' + esc(r.owner + '/' + r.name) + '/tree/' + esc(rep.ref) + '/&lt;folder&gt;</code>.</div>' : '') +
+      (dlFail ? '<div class="tip">' + dlFail + ' file(s) could not be downloaded (CDN or network hiccup). Rescan to retry them; until then the score stays capped.</div>' : '') +
       '<details' + (notAn.length ? ' open' : '') + '><summary>Not analyzed (' + notAn.length + ')' + '</summary>' + (notAn.length ? '<ul class="flist">' + notAn.slice(0, 150).map(function (s) { return '<li><span>' + esc(s.reason) + '</span>' + esc(s.path) + '</li>'; }).join('') + (notAn.length > 150 ? '<li><span>…</span>and ' + (notAn.length - 150) + ' more</li>' : '') + '</ul>' : '<p style="margin:8px 0 0;font-size:.88rem">Nothing skipped among scannable files.</p>') +
       '<p style="margin:10px 0 0;font-size:.84rem;color:var(--muted)">Also ignored: ' + [so.image + ' image(s)', so.vendored + ' vendored/build file(s)', so.lock + ' lockfile(s)', so.minified + ' minified/map file(s)', so.license + ' license/notice file(s)', so.other + ' file(s) of other types (fonts, schemas, data…) not opened'].join(', ') + '.</p></details>' +
       '<details><summary>Analyzed (' + rep.analyzed.length + ')</summary><ul class="flist">' + rep.analyzed.map(function (a) { return '<li><span>' + esc(Math.round(a.bytes / 102.4) / 10) + ' KB</span>' + esc(a.path) + '</li>'; }).join('') + '</ul></details></div>';

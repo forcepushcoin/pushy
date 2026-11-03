@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.jpg" alt="Pushy the hamster in a hoodie, headphones on, slamming a red force-push button. $FORCEPUSH." width="240">
+  <img src="assets/pp-avatar.jpg" alt="Pushy the hamster, drawn in green ASCII, with a small red mark at the corner." width="240">
 </p>
 
 <h1 align="center">Pushy</h1>
@@ -24,7 +24,7 @@ There is no account, no backend, and nothing is uploaded to Pushy. An optional G
 
 ## What Pushy Score checks
 
-Ruleset `pushy-rules` **1.0.0** (2026-11-03). **62 rules** in four categories. The full list of ids, severities, and descriptions is [docs/RULES.md](docs/RULES.md), generated from `score/rules.js`. The same table is rendered on the scan page.
+Ruleset `pushy-rules` **1.1.0** (2026-11-03). **63 rules** in four categories. The full list of ids, severities, and descriptions is [docs/RULES.md](docs/RULES.md), generated from `score/rules.js`. The same table is rendered on the scan page.
 
 ### Secrets
 
@@ -32,9 +32,9 @@ Keys and credential files: AWS access keys, GitHub tokens, `sk-` style LLM and A
 
 ### Code & network
 
-Shell and supply chain: a download piped into a shell, `eval` / `exec` / `new Function` / `pickle`, subprocess and shell spawning, destructive commands, obfuscated payloads and string construction, persistence (shell rc files, cron, launch agents, services, Run keys), reads of SSH keys and other credential stores, reverse shells, and `git push --force`.
+Shell and supply chain: a download piped into a shell, `eval` / `exec` / `new Function` / `pickle`, shell spawning (`shell=true` and the other `X004` patterns), destructive commands, obfuscated payloads and string construction, persistence (shell rc files, cron, launch agents, services, Run keys), reads of SSH keys and other credential stores, reverse shells, and `git push --force`. Argument-array subprocesses without a shell are recorded as info (`X012`) and do not change the score. `X004` and `X012` keep one stored hit per file.
 
-Network: known paste, webhook, and tunnel hosts, a network call sitting next to environment variables or secret paths, raw IP URLs, and plain `http://` endpoints. The scan also lists external hosts it saw (`N005`, informational, penalty 0) and flags a long host list in code.
+Network: known paste, webhook, and tunnel hosts, a network call sitting next to environment variables or secret paths, raw IP URLs, and plain `http://` endpoints. `N002` stays quiet when that window only names a host in the `TRUSTED_API` list in `rules.js` (Anthropic, OpenAI, GitHub, Google, Stripe, Slack, and the other hosts written there). The scan also lists external hosts it saw (`N005`, informational, penalty 0) and flags a long host list in code.
 
 Permissions and packaging: unrestricted `allowed-tools` on a skill, agent settings that skip confirmations or auto-run commands, risky MCP launch config (shell `-c`, unpinned packages, privileged or host-mounted containers, remote plain `http`), `package.json` install scripts and non-registry dependencies, extra Python package indexes, GitHub Actions script injection and `pull_request_target` checkouts, committed binaries and archives, and a skill that ships scripts without `allowed-tools`.
 
@@ -51,11 +51,11 @@ Hidden text: zero-width, bidi, and Unicode tag characters, long base64 or other 
 ## How a scan runs
 
 1. **Pin a commit.** The page loads public repo metadata and the latest commit on the ref you named (the default branch when the URL has no branch). It lists the tree at that exact SHA.
-2. **Pick files.** Up to **40** files, **200 KB** each. Priority goes to `SKILL.md`, `AGENTS.md`, `CLAUDE.md`, `.cursorrules`, MCP manifests, `package.json`, scripts, and prompt files. Skipped files are listed. A `/tree/<ref>/<folder>` URL scans that folder.
-3. **Run the ruleset.** File bodies come from a SHA-pinned jsDelivr URL, then `raw.githubusercontent.com` if that fails. Rules are regexes and small functions in `rules.js`. Nothing is executed.
-4. **Score, cap, and badge.** Four sub-scores become one number. Critical findings and gaps in coverage cap the score. You can download a static SVG badge stamped with the commit, the date, and the ruleset version.
+2. **Pick files.** Up to **400** scannable files, **15 MB** total, **500 KB** each. Priority goes to `SKILL.md`, `AGENTS.md`, `CLAUDE.md`, `.cursorrules`, MCP manifests, `package.json`, scripts, and prompt files. Anything over the budget is listed as not analyzed and caps the score. A `/tree/<ref>/<folder>` URL scans that folder.
+3. **Fetch in parallel and run the ruleset.** File bodies come from a SHA-pinned jsDelivr URL, then `raw.githubusercontent.com` if that fails. A pool of **10** fetches runs at once. Each source is tried up to **3** times, with exponential backoff, jitter, and a **25 s** timeout. HTTP 403, 404, 413, and 451 fall through to the next source. A file that fails on both is listed as not analyzed, with the reason, and caps the score. Each file is analyzed as it arrives. The page keeps a progress bar on "Scanning N/M files…" (plus the path, kilobytes read, and elapsed time) and yields to the browser while the pool runs. Rules are regexes and small functions in `rules.js`. Nothing is executed.
+4. **Score, cap, and badge.** Four sub-scores become one number. Critical findings and gaps in coverage cap the score. The page keeps every hit for scoring, then stores at most **60** findings per rule in the report. You can download a static SVG badge stamped with the commit, the date, and the ruleset version.
 
-A plain `owner/repo` scan makes three GitHub API calls: repository metadata, the commit list, and the git tree. File bodies are downloaded from jsDelivr or `raw.githubusercontent.com` and are not those API calls. Resolving a branch name, or walking a tree GitHub truncated, adds API calls. The page's rate-limit note rounds this to about four requests. Anonymous GitHub API access is 60 requests an hour per IP. A token with no scopes raises that to 5,000.
+A plain `owner/repo` scan makes three GitHub API calls: repository metadata, the commit list, and the git tree. File bodies are downloaded from jsDelivr or `raw.githubusercontent.com` and are not those API calls. Resolving a branch name, or walking a tree GitHub truncated, adds one more API call. The page's rate-limit note rounds this to about four requests. Anonymous GitHub API access is 60 requests an hour per IP. A token with no scopes raises that to 5,000. The disclaimer under the form is one line; the longer list opens from **details**.
 
 ## How scoring works
 
@@ -105,7 +105,7 @@ Bands, from the ruleset:
 | 45–69 | Hmm. Review before you push 🟠 |
 | 0–44 | Do NOT force push this 🔴 |
 
-The on-page verdict keeps the emoji from `rules.js`. If almost nothing was analyzed, the verdict is replaced with "Nothing to scan here" and the score stays capped at 60. On a docs, example, or non-core README path, prompt and code findings drop one severity level before scoring. Test paths drop `X*` code rules one more level. Hidden-Unicode hits (`P011`) are not downgraded. Details are in [docs/RULES.md](docs/RULES.md#severity-on-a-hit).
+The on-page verdict keeps the emoji from `rules.js`. If almost nothing was analyzed, the verdict is replaced with "Nothing to scan here" and the nothing-to-scan cap is 60. Before scoring, prompt and code findings on a docs, example, or non-core README path drop one severity level. Prose files (`.md`, `.mdx`, `.rst`, `.txt`) that are not already on that path drop `X*` and `N*` code findings one level. Test paths drop `X*` code rules one more level. Rules marked `ctx: true` (`X001`, `P001`, `P002`, `P005`, `P009`, `P010`) drop further when the match is quoted, negated, or discussed, and only in instruction files. Tag-character and bidi hits from `P011` are not downgraded. Details are in [docs/RULES.md](docs/RULES.md#severity-on-a-hit).
 
 ## The badge
 
@@ -115,7 +115,7 @@ The badge is a **static snapshot** of one commit on one day. It is not a live sh
 [![Pushy Score 97/100 (commit 194cc86, 2026-11-03)](pushy-score.svg)](https://forcepushcoin.github.io/score/)
 ```
 
-This picture is an example snapshot from ruleset 1.0.0 (score 97, commit `194cc86`, 2026-11-03). It is not a scan of this repository.
+This picture is the sample SVG shipped with the tool (score 97, commit `194cc86`, 2026-11-03, ruleset v1.0.0 stamped on the file). It is not a scan of this repository and it is not a 1.1.0 result.
 
 <p align="center">
   <img src="score/example-badge.svg" alt="Example Pushy Score badge: 97 out of 100, Safe to push, commit 194cc86, 2026-11-03, ruleset v1.0.0. Automated scan, not an audit.">
@@ -127,7 +127,7 @@ Rescan after you push. The file you committed does not update itself.
 
 The live tool is [https://forcepushcoin.github.io/score/](https://forcepushcoin.github.io/score/).
 
-To run this repo locally, serve the **repository root**. The page loads its logo from `../assets/logo.jpg`. Opening `score/index.html` as a file URL can block the GitHub requests the scan needs.
+To run this repo locally, serve the **repository root**. The page loads its mascot from `../assets/pp-avatar.jpg`. Opening `score/index.html` as a file URL can block the GitHub requests the scan needs.
 
 ```bash
 git clone https://github.com/forcepushcoin/pushy.git
@@ -159,7 +159,7 @@ The ruleset's own blind spots:
 - No language model and no person reads the instructions. Social engineering is caught only when a rule matches.
 - Pages and docs a skill links to are never fetched. A clean file can point at instructions that change later.
 - Binaries, archives, `.pyc` bytecode, office documents, and images are not opened.
-- Only the files listed as analyzed were read, at most 40 files and 200 KB each.
+- Only the files listed as analyzed were read: at most 400 scannable files, 15 MB total, and 500 KB each. Anything over that budget, or that failed to download, is listed as not analyzed and caps the score.
 - Dependencies are not scanned for known vulnerabilities or malware. Nothing is executed or sandboxed.
 - One commit is read: the tip of the ref in the URL, or the default branch when you pass `owner/repo`. Other branches, tags, history, and later pushes are outside that result.
 
@@ -175,8 +175,8 @@ Pushy Score is not affiliated with GitHub, Anthropic, or any scanner vendor.
 
 | Path | What it is |
 | --- | --- |
-| [`score/`](score/) | Pushy Score v1. Open `index.html` via a local server. |
-| [`assets/`](assets/) | Logo (`logo.jpg`) and the Pushy mascot (`pp.jpg`). |
+| [`score/`](score/) | Pushy Score v1.1. Open `index.html` via a local server. |
+| [`assets/`](assets/) | `pp-avatar.jpg` (mascot on the scanner and at the top of this page) and `pp.jpg` (the same hamster on a CRT). |
 | [`docs/RULES.md`](docs/RULES.md) | Every rule id, severity, category, and description. |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | How to add a rule, with a test and false-positive guidance. |
 | [`SECURITY.md`](SECURITY.md) | How to report a vulnerability. |

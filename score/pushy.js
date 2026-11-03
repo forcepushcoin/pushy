@@ -126,14 +126,30 @@
   function fileContext(path, name) {
     var core = CORE_INSTR.test(path);
     var docs = !core && (R.FILES.exampleDirs.test(path) || /^(readme|changelog|contributing|code_of_conduct)/i.test(name));
-    return { core: core, docs: docs, tests: !core && /(^|\/)(tests?|__tests__|spec|fixtures?|testdata)\/|\.(test|spec)\.[a-z]+$/i.test(path) };
+    var prose = !core && /\.(md|mdx|rst|txt)$/i.test(path);
+    return { core: core, docs: docs, prose: prose, tests: !core && /(^|\/)(tests?|__tests__|spec|fixtures?|testdata)\/|\.(test|spec)\.[a-z]+$/i.test(path) };
+  }
+
+  var NEG_PRE = /\b(?:never|don'?t|do\s+not|must\s+not|should\s+not|shouldn'?t|avoid|refuse|reject|beware|unsafe|dangerous|malicious|attacks?|injection|untrusted|not\s+to)\b/i;
+  var DISCUSS = /\b(?:e\.g\.|for\s+example|such\s+as|examples?\s+of|phrases?\s+(?:like|such)|patterns?\s+(?:like|such)|looks?\s+like|trained\s+to|red\s+flags?|attack\s+(?:string|pattern|example))\b/i;
+  /* Is the match quoted, negated or being discussed (docs about attacks) rather than instructing? */
+  function defensiveContext(line, idx, len) {
+    var pre = line.slice(Math.max(0, idx - 100), idx);
+    var sb = Math.max(pre.lastIndexOf('. '), pre.lastIndexOf('; '), pre.lastIndexOf('! '), pre.lastIndexOf('? '), pre.lastIndexOf(': ')); // negation only counts inside the same sentence
+    var sent = sb >= 0 ? pre.slice(sb + 2) : pre;
+    if ((pre.match(/"/g) || []).length % 2 === 1 || (pre.match(/`/g) || []).length % 2 === 1 || pre.lastIndexOf('\u201c') > pre.lastIndexOf('\u201d')) return 'quoted';
+    if (NEG_PRE.test(sent)) return 'negated';
+    if (DISCUSS.test(line.slice(Math.max(0, idx - 100), idx + len + 60))) return 'discussed';
+    return null;
   }
 
   function analyzeFile(file) {
     var out = [], text = file.text, lines = text.split(/\r\n|\n|\r/), fc = fileContext(file.path, file.entry.name);
     function push(rule, hit, extra) {
       var sev = hit.sev || rule.sev, base = sev, note = null;
+      if (hit.defensive) { var lv = fc.core ? 1 : 2; for (var k = 0; k < lv; k++) sev = SEV_DOWN[sev]; if (sev !== base) note = hit.defensive + ' / discussion context: severity lowered' + (lv > 1 ? ' two levels' : ' one level'); }
       if (fc.docs && (rule.cat === 'prompt' || rule.cat === 'code') && !hit.noEscapeCtx) { sev = SEV_DOWN[sev]; if (sev !== base) note = 'docs / test / example path: severity lowered one level'; }
+      if (fc.prose && !fc.docs && rule.cat === 'code' && /^[XN]/.test(rule.id) && !hit.noEscapeCtx) { var s1 = SEV_DOWN[sev]; if (s1 !== sev) { sev = s1; note = 'code sample in a markdown doc: severity lowered one level'; } }
       if (fc.tests && rule.cat === 'code' && !hit.noEscapeCtx && /^X/.test(rule.id)) { var s2 = SEV_DOWN[sev]; if (s2 !== sev) { sev = s2; note = 'test path: severity lowered two levels'; } }
       out.push({ id: rule.id, cat: rule.cat, sev: sev, baseSev: base, title: rule.title, why: rule.why, fix: rule.fix,
         path: file.path, line: hit.line, snippet: hit.snippet || '', note: note });
@@ -142,6 +158,7 @@
     var per = counts();
     function capOK(rule) { per[rule.id] = (per[rule.id] || 0) + 1; if (per[rule.id] > R.LIMITS.maxFindingsPerRulePerFile) { per[rule.id + ':more'] = (per[rule.id + ':more'] || 0) + 1; return false; } return true; }
 
+    var onceCount = {}, onceFirst = {};
     R.lineRules.forEach(function (rule) {
       if (rule.kinds.indexOf(file.kind) < 0) return;
       if (rule.exts && rule.exts.indexOf(file.entry.ext) < 0) return;
@@ -151,18 +168,22 @@
           var l = lines[i]; if (!l || l.length < 6) continue;
           var m = rule.re.exec(l);
           if (!m) continue;
-          if ((rule.cat === 'code' || rule.cat === 'network') && (file.kind === 'code' || file.kind === 'config') && /^\s*(?:#|\/\/|\*|\/\*|--)/.test(l)) continue;
+          if ((rule.cat === 'code' || rule.cat === 'network' || rule.cat === 'prompt') && (file.kind === 'code' || file.kind === 'config') && /^\s*(?:#|\/\/|\*|\/\*|--)/.test(l)) continue;
+          if (rule.oncePerFile && onceCount[rule.id]) { onceCount[rule.id]++; if (onceFirst[rule.id]) onceFirst[rule.id].snippet = onceFirst[rule.id].snippet.replace(/ \(\+\d+ more in this file\)$/, '') + ' (+' + (onceCount[rule.id] - 1) + ' more in this file)'; continue; }
           if (rule.filter && !rule.filter(m, l, { path: file.path })) continue;
           if (!capOK(rule)) continue;
           var ri = m.index, rl = m[0].length;
           if (rule.redact && m[1]) { ri = m.index + m[0].lastIndexOf(m[1]); rl = m[1].length; }
-          push(rule, { line: i + 1, snippet: makeSnippet(l, ri, rl, rule.redact) });
+          if (rule.oncePerFile) onceCount[rule.id] = 1;
+          push(rule, { line: i + 1, snippet: makeSnippet(l, ri, rl, rule.redact), defensive: (rule.ctx && file.kind === 'instr') ? defensiveContext(l, m.index, m[0].length) : null });
+          if (rule.oncePerFile) onceFirst[rule.id] = out[out.length - 1];
         }
       } else if (rule.all) {
         for (var j = 0; j < lines.length; j++) {
           if (!lines[j] || !rule.all[0].test(lines[j])) continue;
           var win = lines.slice(j, j + 1 + (rule.within || 3)).join('\n');
           if (!rule.all[1].test(win)) continue;
+          if (rule.filter && !rule.filter(null, lines[j], { win: win, path: file.path })) continue;
           if (rule.all[0].test(lines[j]) && /^\s*(?:#|\/\/|\*|<!--)/.test(lines[j]) && file.kind === 'code') continue;
           if (seen[j]) continue; for (var q = j; q <= j + 2; q++) seen[q] = 1;
           if (!capOK(rule)) continue;
@@ -281,11 +302,12 @@
     var cands = entries.filter(function (e) { return TEXT_KINDS[e.kind] && e.size > 0; });
     cands.forEach(function (e) { e.prio = priority(e, skillDirs); });
     cands.sort(function (a, b) { return a.prio - b.prio || a.depth - b.depth || (a.path < b.path ? -1 : 1); });
-    var picked = [], skipped = [];
+    var picked = [], skipped = [], budgetBytes = 0, L = R.LIMITS;
     cands.forEach(function (e) {
-      if (e.size > R.LIMITS.maxFileBytes) skipped.push({ path: e.path, reason: 'too large (' + Math.round(e.size / 1024) + ' KB > ' + (R.LIMITS.maxFileBytes / 1024) + ' KB)', counts: true });
-      else if (picked.length >= R.LIMITS.maxFiles) skipped.push({ path: e.path, reason: 'over the ' + R.LIMITS.maxFiles + '-file limit', counts: true });
-      else picked.push(e);
+      if (e.size > L.maxFileBytes) skipped.push({ path: e.path, reason: 'too large (' + Math.round(e.size / 1024) + ' KB > ' + (L.maxFileBytes / 1024) + ' KB per-file cap)', counts: true });
+      else if (picked.length >= L.maxFiles) skipped.push({ path: e.path, reason: 'over the ' + L.maxFiles + '-file budget', counts: true });
+      else if (budgetBytes + e.size > L.maxTotalBytes) skipped.push({ path: e.path, reason: 'over the ' + Math.round(L.maxTotalBytes / 1048576) + ' MB total download budget', counts: true });
+      else { picked.push(e); budgetBytes += e.size; }
     });
     var relevantTotal = cands.length;
 
@@ -300,47 +322,35 @@
     var skippedOther = { image: 0, vendored: 0, lock: 0, minified: 0, license: 0, other: 0 };
     entries.forEach(function (e) { if (skippedOther[e.kind] !== undefined && e.size > 0) skippedOther[e.kind]++; });
 
-    // fetch bodies
-    log('Reading ' + picked.length + ' file' + (picked.length === 1 ? '' : 's') + ' (pinned to ' + sha.slice(0, 7) + ')…');
-    var analyzed = [], hostsAll = {}, hostsCode = {}, done = 0;
+    // fetch bodies (pool) + analyze as they arrive, yielding to the UI
+    log('Reading ' + picked.length + ' file' + (picked.length === 1 ? '' : 's') + ' (' + Math.round(budgetBytes / 1024) + ' KB, pinned to ' + sha.slice(0, 7) + ')…');
+    var analyzed = [], hostsAll = {}, hostsCode = {}, done = 0, readmeText = '', readmePath = '', skillFm = {}, netErrors = 0;
+    var t0 = now0();
+    function now0() { return (typeof performance !== 'undefined' ? performance.now() : Date.now()); }
+    var abortAll = false;
     async function fetchText(e) {
       var urls = ['https://cdn.jsdelivr.net/gh/' + o + '/' + r + '@' + sha + '/' + encPath(e.path), 'https://raw.githubusercontent.com/' + o + '/' + r + '/' + sha + '/' + encPath(e.path)];
-      var lastErr = null;
+      var why = [];
       for (var u = 0; u < urls.length; u++) {
-        for (var attempt = 0; attempt < 2; attempt++) {
-          var ctl = typeof AbortController !== 'undefined' ? new AbortController() : null, to = ctl && setTimeout(function () { ctl.abort(); }, 20000);
+        var host = u === 0 ? 'jsDelivr' : 'raw.githubusercontent';
+        for (var attempt = 0; attempt < 3; attempt++) {
+          var ctl = typeof AbortController !== 'undefined' ? new AbortController() : null, to = ctl && setTimeout(function () { ctl.abort(); }, 25000);
           try {
             var res = await ff(urls[u], ctl ? { signal: ctl.signal } : {});
             if (to) clearTimeout(to);
             if (res.ok) return await res.text();
-            lastErr = 'HTTP ' + res.status;
-            if (res.status === 404) break;
-          } catch (err) { if (to) clearTimeout(to); lastErr = 'network error'; }
-          await sleep(250);
+            if (res.status === 404 || res.status === 403 || res.status === 413 || res.status === 451) { why.push(host + ' ' + res.status); break; } // not retryable here: fall through to next source
+            why.push(host + ' HTTP ' + res.status);
+          } catch (err) { if (to) clearTimeout(to); why.push(host + (err && err.name === 'AbortError' ? ' timeout' : ' network error')); }
+          await sleep(300 * Math.pow(2, attempt) + Math.random() * 150); // 300, 600, 1200 ms backoff
         }
       }
-      throw new Error(lastErr || 'failed');
+      var last = why.slice(-2).join(', ');
+      throw new Error(last || 'failed');
     }
-    var queue = picked.slice(), results = {};
-    async function worker() {
-      while (queue.length) {
-        var e = queue.shift();
-        try { results[e.path] = { text: await fetchText(e), entry: e }; }
-        catch (err) { results[e.path] = { error: err.message, entry: e }; }
-        done++; if (opts.onFile) opts.onFile(done, picked.length, e.path);
-      }
-    }
-    var workers = []; for (var w = 0; w < R.LIMITS.fetchConcurrency; w++) workers.push(worker());
-    await Promise.all(workers);
-
-    log('Running ' + (R.lineRules.length + R.specialRules.length + R.fileRules.length + R.pathRules.length + R.repoRules.length) + ' rules…');
-    var readmeText = '', readmePath = '', skillFm = {};
-    picked.forEach(function (e) {
-      var res = results[e.path];
-      if (!res || res.error) { skipped.push({ path: e.path, reason: 'could not be downloaded (' + (res ? res.error : 'unknown') + ')', counts: true }); return; }
-      var text = res.text;
+    function handle(e, text) {
       if (text.indexOf('\u0000') >= 0) { skipped.push({ path: e.path, reason: 'contains binary data', counts: true }); return; }
-      if (text.length > R.LIMITS.maxFileBytes * 2) { skipped.push({ path: e.path, reason: 'too large after download', counts: true }); return; }
+      if (text.length > L.maxFileBytes * 2) { skipped.push({ path: e.path, reason: 'too large after download', counts: true }); return; }
       var f = { path: e.path, text: text, kind: e.kind, entry: e };
       analyzed.push({ path: e.path, bytes: text.length, kind: e.kind, prio: e.prio });
       if (/^readme(\.[a-z]+)?$/i.test(e.name) && e.depth === 0) { readmeText = text; readmePath = e.path; }
@@ -348,7 +358,24 @@
       findings = findings.concat(analyzeFile(f));
       if (e.kind === 'code' || e.kind === 'config' || /SKILL\.md$/i.test(e.path)) collectHosts(text, hostsAll);
       if (e.kind === 'code') collectHosts(text, hostsCode);
-    });
+    }
+    var queue = picked.slice(), bytesDone = 0;
+    async function worker() {
+      while (queue.length && !abortAll) {
+        var e = queue.shift(), text = null;
+        try { text = await fetchText(e); }
+        catch (err) { skipped.push({ path: e.path, reason: 'could not be downloaded (' + err.message + ')', counts: true }); netErrors++; }
+        if (text !== null) { try { handle(e, text); } catch (err) { skipped.push({ path: e.path, reason: 'analysis error (' + (err && err.message || 'unknown') + ')', counts: true }); } bytesDone += e.size; }
+        done++; if (opts.onFile) opts.onFile(done, picked.length, e.path, bytesDone, budgetBytes);
+        if (done % 8 === 0) await sleep(0); // let the UI paint
+      }
+    }
+    var workers = []; for (var w = 0; w < L.fetchConcurrency; w++) workers.push(worker());
+    await Promise.all(workers);
+    var fetchMs = Math.round(now0() - t0);
+    log('Running ' + (R.lineRules.length + R.specialRules.length + R.fileRules.length + R.pathRules.length + R.repoRules.length) + ' rules…');
+    await sleep(0);
+    analyzed.sort(function (a, b) { return a.prio - b.prio || (a.path < b.path ? -1 : 1); });
     var hostList = Object.keys(hostsAll).sort(function (a, b) { return hostsAll[b] - hostsAll[a]; });
     var codeHostList = Object.keys(hostsCode);
 
@@ -379,6 +406,9 @@
     if (nothing) capList.push({ value: C.nothingToScan, reason: 'there was almost nothing to scan (no skills, MCP config, scripts or code were analyzed)' });
 
     var sc = scoreFindings(findings, capList), band = bandFor(sc.score);
+    // keep the report light: store at most maxFindingsPerRule hits per rule (scoring above used all of them)
+    var perRule = {}, trimmed = {};
+    findings = findings.filter(function (f) { var k = f.id; perRule[k] = (perRule[k] || 0) + 1; if (perRule[k] > R.LIMITS.maxFindingsPerRule) { trimmed[k] = perRule[k] - R.LIMITS.maxFindingsPerRule; return false; } return true; });
     if (nothing) band = { key: 'gray', label: 'Nothing to scan here 🤷', line: 'No skill files, MCP config or code were found, so the score only reflects docs and upkeep.' };
 
     return {
@@ -387,7 +417,9 @@
       ref: ref, subpath: subpath, sha: sha, shortSha: sha.slice(0, 7), commitDate: commits[0].date,
       score: sc.score, rawScore: sc.raw, capped: sc.capped, caps: sc.caps, sub: sc.sub, counts: sc.counts, band: band,
       findings: findings,
-      coverage: { relevantTotal: relevantTotal, analyzed: analyzed.length, skippedCounted: skipCount, treeTruncated: truncated, treeNote: treeNote, totalFiles: entries.length },
+      coverage: { budget: { files: R.LIMITS.maxFiles, bytes: R.LIMITS.maxTotalBytes, perFile: R.LIMITS.maxFileBytes }, relevantTotal: relevantTotal, analyzed: analyzed.length, skippedCounted: skipCount, treeTruncated: truncated, treeNote: treeNote, totalFiles: entries.length },
+      trimmedFindings: trimmed,
+      stats: { apiCalls: api.rate.used, fetchMs: fetchMs, filesFetched: picked.length, bytesAnalyzed: analyzed.reduce(function (n, a) { return n + a.bytes; }, 0), budgetBytes: budgetBytes, netErrors: netErrors },
       analyzed: analyzed, skipped: skipped, skippedOther: skippedOther,
       hosts: hostList, greenFlags: greenFlags(entries, repo, scopeRoot),
       rate: { remaining: api.rate.remaining, limit: api.rate.limit, reset: api.rate.reset ? api.rate.reset * 1000 : null, used: api.rate.used },
