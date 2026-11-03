@@ -1,7 +1,8 @@
 /*!
  * Pushy Score engine — client-side GitHub repo scanner.
  * Automated scan, not an audit or guarantee. Rules live in rules.js.
- * Works in browsers (GitHub Pages) and Node 18+ (for tests). No dependencies, no backend.
+ * Works in browsers (GitHub Pages) and Node 18+ (for tests and the GitHub Action).
+ * No dependencies, no backend. `scan` fetches a public GitHub repo. `scanLocal` reads a directory on disk.
  */
 (function (root) {
   'use strict';
@@ -233,6 +234,92 @@
   }
   function bandFor(score) { var b = R.SCORING.bands; for (var i = 0; i < b.length; i++) if (score >= b[i].min) return b[i]; return b[b.length - 1]; }
 
+  /* Shared by the GitHub scan and the local (Action) scan. Same budget, path rules, caps, and score. */
+  function prepareEntries(entries) {
+    var skillDirs = entries.filter(function (e) { return /(^|\/)SKILL\.md$/i.test(e.path); }).map(function (e) { return e.path.replace(/SKILL\.md$/i, ''); });
+    var cands = entries.filter(function (e) { return TEXT_KINDS[e.kind] && e.size > 0; });
+    cands.forEach(function (e) { e.prio = priority(e, skillDirs); });
+    cands.sort(function (a, b) { return a.prio - b.prio || a.depth - b.depth || (a.path < b.path ? -1 : 1); });
+    var picked = [], skipped = [], budgetBytes = 0, L = R.LIMITS;
+    cands.forEach(function (e) {
+      if (e.size > L.maxFileBytes) skipped.push({ path: e.path, reason: 'too large (' + Math.round(e.size / 1024) + ' KB > ' + (L.maxFileBytes / 1024) + ' KB per-file cap)', counts: true });
+      else if (picked.length >= L.maxFiles) skipped.push({ path: e.path, reason: 'over the ' + L.maxFiles + '-file budget', counts: true });
+      else if (budgetBytes + e.size > L.maxTotalBytes) skipped.push({ path: e.path, reason: 'over the ' + Math.round(L.maxTotalBytes / 1048576) + ' MB total download budget', counts: true });
+      else { picked.push(e); budgetBytes += e.size; }
+    });
+    var findings = [];
+    entries.forEach(function (e) {
+      R.pathRules.forEach(function (rule) {
+        if (rule.test(e)) findings.push({ id: rule.id, cat: rule.cat, sev: rule.sev, baseSev: rule.sev, title: rule.title, why: rule.why, fix: rule.fix, path: e.path, line: null, snippet: (e.kind === 'binary' || e.kind === 'archive' ? e.size.toLocaleString('en-US') + ' bytes, not analyzed' : ''), note: null });
+      });
+      if (e.kind === 'binary' || e.kind === 'archive') skipped.push({ path: e.path, reason: e.kind === 'binary' ? 'binary / bytecode (not opened)' : 'archive / document (not opened)', counts: false, binary: true });
+    });
+    var skippedOther = { image: 0, vendored: 0, lock: 0, minified: 0, license: 0, other: 0 };
+    entries.forEach(function (e) { if (skippedOther[e.kind] !== undefined && e.size > 0) skippedOther[e.kind]++; });
+    return { skillDirs: skillDirs, picked: picked, skipped: skipped, budgetBytes: budgetBytes, relevantTotal: cands.length, findings: findings, skippedOther: skippedOther };
+  }
+
+  function absorbFile(e, text, st) {
+    if (text.indexOf('\u0000') >= 0) { st.skipped.push({ path: e.path, reason: 'contains binary data', counts: true }); return; }
+    if (text.length > R.LIMITS.maxFileBytes * 2) { st.skipped.push({ path: e.path, reason: 'too large after download', counts: true }); return; }
+    var f = { path: e.path, text: text, kind: e.kind, entry: e };
+    st.analyzed.push({ path: e.path, bytes: text.length, kind: e.kind, prio: e.prio });
+    if (/^readme(\.[a-z]+)?$/i.test(e.name) && e.depth === 0) { st.readmeText = text; st.readmePath = e.path; }
+    if (/(^|\/)SKILL\.md$/i.test(e.path)) st.skillFm[e.path] = R.helpers.frontmatter(text);
+    var more = analyzeFile(f);
+    for (var i = 0; i < more.length; i++) st.findings.push(more[i]);
+    if (e.kind === 'code' || e.kind === 'config' || /SKILL\.md$/i.test(e.path)) collectHosts(text, st.hostsAll);
+    if (e.kind === 'code') collectHosts(text, st.hostsCode);
+  }
+
+  function finishReport(s) {
+    var findings = s.findings;
+    var hostList = Object.keys(s.hostsAll || {}).sort(function (a, b) { return s.hostsAll[b] - s.hostsAll[a]; });
+    var codeHostList = Object.keys(s.hostsCode || {});
+    s.analyzed.sort(function (a, b) { return a.prio - b.prio || (a.path < b.path ? -1 : 1); });
+    var rctx = { repo: s.repo, commits: s.commits, authors: s.authors, entries: s.entries, readme: s.readmeText, readmePath: s.readmePath, now: s.now,
+      hosts: hostList, codeHosts: codeHostList, scopeRoot: s.scopeRoot, skillDirs: s.skillDirs.map(function (d) { return { dir: d, skillPath: d + 'SKILL.md' }; }), skillFm: s.skillFm };
+    R.repoRules.forEach(function (rule) {
+      var hs = []; try { hs = rule.run(rctx) || []; } catch (e) { hs = []; }
+      hs.forEach(function (h) { findings.push({ id: rule.id, cat: rule.cat, sev: h.sev || rule.sev, baseSev: h.sev || rule.sev, title: rule.title, why: rule.why, fix: rule.fix, path: h.path || null, line: h.line || null, snippet: h.snippet || '', note: null }); });
+    });
+    var seenKey = {}; findings = findings.filter(function (f) { var k = f.id + '|' + f.path + '|' + f.line + '|' + f.snippet; if (seenKey[k]) return false; seenKey[k] = 1; return true; });
+    findings.sort(function (a, b) { return SEV_ORDER[b.sev] - SEV_ORDER[a.sev] || (a.cat < b.cat ? -1 : 1) || (a.path || '').localeCompare(b.path || '') || (a.line || 0) - (b.line || 0); });
+    var o = s.owner, r = s.repoName, sha = s.sha;
+    findings.forEach(function (f) { f.url = (o && r && sha && f.path) ? 'https://github.com/' + o + '/' + r + '/blob/' + sha + '/' + encPath(f.path) + (f.line ? '#L' + f.line : '') : null; });
+    var skipped = s.skipped, relevantTotal = s.relevantTotal, truncated = s.truncated;
+    var C = R.SCORING.caps, capList = [];
+    var skipCount = skipped.filter(function (x) { return x.counts; }).length, ratio = relevantTotal ? skipCount / relevantTotal : 0;
+    if (truncated) capList.push({ value: C.treeTruncated, reason: 'GitHub truncated the file tree, so some files were never listed' });
+    if (ratio > 0.5) capList.push({ value: C.skippedOver50pct, reason: skipCount + ' of ' + relevantTotal + ' scannable files were NOT analyzed (' + Math.round(ratio * 100) + '%)' });
+    else if (ratio > 0.2) capList.push({ value: C.skippedOver20pct, reason: skipCount + ' of ' + relevantTotal + ' scannable files were NOT analyzed (' + Math.round(ratio * 100) + '%)' });
+    else if (skipCount > 0) capList.push({ value: C.skippedSome, reason: skipCount + ' scannable file' + (skipCount > 1 ? 's were' : ' was') + ' NOT analyzed' });
+    var binCount = skipped.filter(function (x) { return x.binary; }).length;
+    if (binCount) capList.push({ value: C.binariesOrArchives, reason: binCount + ' binary / archive file' + (binCount > 1 ? 's' : '') + ' present that this scan cannot open' });
+    var core = s.analyzed.filter(function (a) { return !/(^|\/)(README|LICENSE|LICENCE|NOTICE|CONTRIBUTING|CHANGELOG|SECURITY)(\.[a-z]+)?$/i.test(a.path); });
+    var nothing = core.length === 0;
+    if (nothing) capList.push({ value: C.nothingToScan, reason: 'there was almost nothing to scan (no skills, MCP config, scripts or code were analyzed)' });
+    var sc = scoreFindings(findings, capList), band = bandFor(sc.score);
+    var perRule = {}, trimmed = {};
+    findings = findings.filter(function (f) { var k = f.id; perRule[k] = (perRule[k] || 0) + 1; if (perRule[k] > R.LIMITS.maxFindingsPerRule) { trimmed[k] = perRule[k] - R.LIMITS.maxFindingsPerRule; return false; } return true; });
+    if (nothing) band = { key: 'gray', label: 'Nothing to scan here 🤷', line: 'No skill files, MCP config or code were found, so the score only reflects docs and upkeep.' };
+    var repo = s.repo || {}, commits = s.commits || [], rate = s.rate || {};
+    return {
+      ruleset: R.RULESET, scoredAt: s.now, scoreDay: isoDay(s.now),
+      repo: { owner: o, name: r, url: repo.html_url, description: repo.description, stars: repo.stargazers_count, fork: repo.fork, archived: repo.archived, license: repo.license && repo.license.spdx_id, pushedAt: repo.pushed_at, createdAt: repo.created_at, defaultBranch: repo.default_branch },
+      ref: s.ref, subpath: s.subpath, sha: sha, shortSha: sha ? String(sha).slice(0, 7) : '', commitDate: commits.length ? commits[0].date : null,
+      score: sc.score, rawScore: sc.raw, capped: sc.capped, caps: sc.caps, sub: sc.sub, counts: sc.counts, band: band,
+      findings: findings,
+      coverage: { budget: { files: R.LIMITS.maxFiles, bytes: R.LIMITS.maxTotalBytes, perFile: R.LIMITS.maxFileBytes }, relevantTotal: relevantTotal, analyzed: s.analyzed.length, skippedCounted: skipCount, treeTruncated: truncated, treeNote: s.treeNote, totalFiles: s.entries.length },
+      trimmedFindings: trimmed,
+      stats: { apiCalls: rate.used || 0, fetchMs: s.fetchMs || 0, filesFetched: s.pickedCount || 0, bytesAnalyzed: s.analyzed.reduce(function (n, a) { return n + a.bytes; }, 0), budgetBytes: s.budgetBytes || 0, netErrors: s.netErrors || 0 },
+      analyzed: s.analyzed, skipped: skipped, skippedOther: s.skippedOther,
+      hosts: hostList, greenFlags: greenFlags(s.entries, repo, s.scopeRoot),
+      rate: { remaining: rate.remaining != null ? rate.remaining : null, limit: rate.limit != null ? rate.limit : null, reset: rate.reset ? rate.reset * 1000 : null, used: rate.used || 0 },
+      blindSpots: R.BLIND_SPOTS, disclaimer: 'Automated scan, not an audit or guarantee.'
+    };
+  }
+
   /* ---------------------------------------------------------- main scan */
   async function scan(input, opts) {
     opts = opts || {};
@@ -297,34 +384,13 @@
     if (!entries.length) throw PushyError('EMPTY', subpath ? 'No files found in that folder.' : 'No files found in that repository.');
     var scopeRoot = !subpath;
 
-    // choose files
-    var skillDirs = entries.filter(function (e) { return /(^|\/)SKILL\.md$/i.test(e.path); }).map(function (e) { return e.path.replace(/SKILL\.md$/i, ''); });
-    var cands = entries.filter(function (e) { return TEXT_KINDS[e.kind] && e.size > 0; });
-    cands.forEach(function (e) { e.prio = priority(e, skillDirs); });
-    cands.sort(function (a, b) { return a.prio - b.prio || a.depth - b.depth || (a.path < b.path ? -1 : 1); });
-    var picked = [], skipped = [], budgetBytes = 0, L = R.LIMITS;
-    cands.forEach(function (e) {
-      if (e.size > L.maxFileBytes) skipped.push({ path: e.path, reason: 'too large (' + Math.round(e.size / 1024) + ' KB > ' + (L.maxFileBytes / 1024) + ' KB per-file cap)', counts: true });
-      else if (picked.length >= L.maxFiles) skipped.push({ path: e.path, reason: 'over the ' + L.maxFiles + '-file budget', counts: true });
-      else if (budgetBytes + e.size > L.maxTotalBytes) skipped.push({ path: e.path, reason: 'over the ' + Math.round(L.maxTotalBytes / 1048576) + ' MB total download budget', counts: true });
-      else { picked.push(e); budgetBytes += e.size; }
-    });
-    var relevantTotal = cands.length;
-
-    // path rules + non-fetched kinds
-    var findings = [];
-    entries.forEach(function (e) {
-      R.pathRules.forEach(function (rule) {
-        if (rule.test(e)) findings.push({ id: rule.id, cat: rule.cat, sev: rule.sev, baseSev: rule.sev, title: rule.title, why: rule.why, fix: rule.fix, path: e.path, line: null, snippet: (e.kind === 'binary' || e.kind === 'archive' ? e.size.toLocaleString('en-US') + ' bytes, not analyzed' : ''), note: null });
-      });
-      if (e.kind === 'binary' || e.kind === 'archive') skipped.push({ path: e.path, reason: e.kind === 'binary' ? 'binary / bytecode (not opened)' : 'archive / document (not opened)', counts: false, binary: true });
-    });
-    var skippedOther = { image: 0, vendored: 0, lock: 0, minified: 0, license: 0, other: 0 };
-    entries.forEach(function (e) { if (skippedOther[e.kind] !== undefined && e.size > 0) skippedOther[e.kind]++; });
+    var prep = prepareEntries(entries);
+    var st = { skipped: prep.skipped, findings: prep.findings, analyzed: [], readmeText: '', readmePath: '', skillFm: {}, hostsAll: {}, hostsCode: {} };
+    var picked = prep.picked, budgetBytes = prep.budgetBytes, L = R.LIMITS;
 
     // fetch bodies (pool) + analyze as they arrive, yielding to the UI
     log('Reading ' + picked.length + ' file' + (picked.length === 1 ? '' : 's') + ' (' + Math.round(budgetBytes / 1024) + ' KB, pinned to ' + sha.slice(0, 7) + ')…');
-    var analyzed = [], hostsAll = {}, hostsCode = {}, done = 0, readmeText = '', readmePath = '', skillFm = {}, netErrors = 0;
+    var done = 0, netErrors = 0;
     var t0 = now0();
     function now0() { return (typeof performance !== 'undefined' ? performance.now() : Date.now()); }
     var abortAll = false;
@@ -348,24 +414,14 @@
       var last = why.slice(-2).join(', ');
       throw new Error(last || 'failed');
     }
-    function handle(e, text) {
-      if (text.indexOf('\u0000') >= 0) { skipped.push({ path: e.path, reason: 'contains binary data', counts: true }); return; }
-      if (text.length > L.maxFileBytes * 2) { skipped.push({ path: e.path, reason: 'too large after download', counts: true }); return; }
-      var f = { path: e.path, text: text, kind: e.kind, entry: e };
-      analyzed.push({ path: e.path, bytes: text.length, kind: e.kind, prio: e.prio });
-      if (/^readme(\.[a-z]+)?$/i.test(e.name) && e.depth === 0) { readmeText = text; readmePath = e.path; }
-      if (/(^|\/)SKILL\.md$/i.test(e.path)) skillFm[e.path] = R.helpers.frontmatter(text);
-      findings = findings.concat(analyzeFile(f));
-      if (e.kind === 'code' || e.kind === 'config' || /SKILL\.md$/i.test(e.path)) collectHosts(text, hostsAll);
-      if (e.kind === 'code') collectHosts(text, hostsCode);
-    }
+    function handle(e, text) { absorbFile(e, text, st); }
     var queue = picked.slice(), bytesDone = 0;
     async function worker() {
       while (queue.length && !abortAll) {
         var e = queue.shift(), text = null;
         try { text = await fetchText(e); }
-        catch (err) { skipped.push({ path: e.path, reason: 'could not be downloaded (' + err.message + ')', counts: true }); netErrors++; }
-        if (text !== null) { try { handle(e, text); } catch (err) { skipped.push({ path: e.path, reason: 'analysis error (' + (err && err.message || 'unknown') + ')', counts: true }); } bytesDone += e.size; }
+        catch (err) { st.skipped.push({ path: e.path, reason: 'could not be downloaded (' + err.message + ')', counts: true }); netErrors++; }
+        if (text !== null) { try { handle(e, text); } catch (err) { st.skipped.push({ path: e.path, reason: 'analysis error (' + (err && err.message || 'unknown') + ')', counts: true }); } bytesDone += e.size; }
         done++; if (opts.onFile) opts.onFile(done, picked.length, e.path, bytesDone, budgetBytes);
         if (done % 8 === 0) await sleep(0); // let the UI paint
       }
@@ -375,56 +431,80 @@
     var fetchMs = Math.round(now0() - t0);
     log('Running ' + (R.lineRules.length + R.specialRules.length + R.fileRules.length + R.pathRules.length + R.repoRules.length) + ' rules…');
     await sleep(0);
-    analyzed.sort(function (a, b) { return a.prio - b.prio || (a.path < b.path ? -1 : 1); });
-    var hostList = Object.keys(hostsAll).sort(function (a, b) { return hostsAll[b] - hostsAll[a]; });
-    var codeHostList = Object.keys(hostsCode);
-
-    // repo-level rules
-    var rctx = { repo: repo, commits: commits, authors: authors, entries: entries, readme: readmeText, readmePath: readmePath, now: now,
-      hosts: hostList, codeHosts: codeHostList, scopeRoot: scopeRoot, skillDirs: skillDirs.map(function (d) { return { dir: d, skillPath: d + 'SKILL.md' }; }), skillFm: skillFm };
-    R.repoRules.forEach(function (rule) {
-      var hs = []; try { hs = rule.run(rctx) || []; } catch (e) { hs = []; }
-      hs.forEach(function (h) { findings.push({ id: rule.id, cat: rule.cat, sev: h.sev || rule.sev, baseSev: h.sev || rule.sev, title: rule.title, why: rule.why, fix: rule.fix, path: h.path || null, line: h.line || null, snippet: h.snippet || '', note: null }); });
+    return finishReport({
+      findings: st.findings, skipped: st.skipped, skippedOther: prep.skippedOther, analyzed: st.analyzed, entries: entries,
+      relevantTotal: prep.relevantTotal, truncated: truncated, treeNote: treeNote, repo: repo, commits: commits, authors: authors,
+      readmeText: st.readmeText, readmePath: st.readmePath, hostsAll: st.hostsAll, hostsCode: st.hostsCode, scopeRoot: scopeRoot,
+      skillDirs: prep.skillDirs, skillFm: st.skillFm, now: now, owner: o, repoName: r, ref: ref, subpath: subpath, sha: sha,
+      budgetBytes: budgetBytes, pickedCount: picked.length, fetchMs: fetchMs, netErrors: netErrors, rate: api.rate
     });
+  }
 
-    // dedupe + sort
-    var seenKey = {}; findings = findings.filter(function (f) { var k = f.id + '|' + f.path + '|' + f.line + '|' + f.snippet; if (seenKey[k]) return false; seenKey[k] = 1; return true; });
-    findings.sort(function (a, b) { return SEV_ORDER[b.sev] - SEV_ORDER[a.sev] || (a.cat < b.cat ? -1 : 1) || (a.path || '') .localeCompare(b.path || '') || (a.line || 0) - (b.line || 0); });
-    findings.forEach(function (f) { f.url = f.path ? 'https://github.com/' + o + '/' + r + '/blob/' + sha + '/' + encPath(f.path) + (f.line ? '#L' + f.line : '') : null; });
-
-    // coverage caps
-    var C = R.SCORING.caps, capList = [];
-    var skipCount = skipped.filter(function (s) { return s.counts; }).length, ratio = relevantTotal ? skipCount / relevantTotal : 0;
-    if (truncated) capList.push({ value: C.treeTruncated, reason: 'GitHub truncated the file tree, so some files were never listed' });
-    if (ratio > 0.5) capList.push({ value: C.skippedOver50pct, reason: skipCount + ' of ' + relevantTotal + ' scannable files were NOT analyzed (' + Math.round(ratio * 100) + '%)' });
-    else if (ratio > 0.2) capList.push({ value: C.skippedOver20pct, reason: skipCount + ' of ' + relevantTotal + ' scannable files were NOT analyzed (' + Math.round(ratio * 100) + '%)' });
-    else if (skipCount > 0) capList.push({ value: C.skippedSome, reason: skipCount + ' scannable file' + (skipCount > 1 ? 's were' : ' was') + ' NOT analyzed' });
-    var binCount = skipped.filter(function (s) { return s.binary; }).length;
-    if (binCount) capList.push({ value: C.binariesOrArchives, reason: binCount + ' binary / archive file' + (binCount > 1 ? 's' : '') + ' present that this scan cannot open' });
-    var core = analyzed.filter(function (a) { return !/(^|\/)(README|LICENSE|LICENCE|NOTICE|CONTRIBUTING|CHANGELOG|SECURITY)(\.[a-z]+)?$/i.test(a.path); });
-    var nothing = core.length === 0;
-    if (nothing) capList.push({ value: C.nothingToScan, reason: 'there was almost nothing to scan (no skills, MCP config, scripts or code were analyzed)' });
-
-    var sc = scoreFindings(findings, capList), band = bandFor(sc.score);
-    // keep the report light: store at most maxFindingsPerRule hits per rule (scoring above used all of them)
-    var perRule = {}, trimmed = {};
-    findings = findings.filter(function (f) { var k = f.id; perRule[k] = (perRule[k] || 0) + 1; if (perRule[k] > R.LIMITS.maxFindingsPerRule) { trimmed[k] = perRule[k] - R.LIMITS.maxFindingsPerRule; return false; } return true; });
-    if (nothing) band = { key: 'gray', label: 'Nothing to scan here 🤷', line: 'No skill files, MCP config or code were found, so the score only reflects docs and upkeep.' };
-
-    return {
-      ruleset: R.RULESET, scoredAt: now, scoreDay: isoDay(now),
-      repo: { owner: o, name: r, url: repo.html_url, description: repo.description, stars: repo.stargazers_count, fork: repo.fork, archived: repo.archived, license: repo.license && repo.license.spdx_id, pushedAt: repo.pushed_at, createdAt: repo.created_at, defaultBranch: repo.default_branch },
-      ref: ref, subpath: subpath, sha: sha, shortSha: sha.slice(0, 7), commitDate: commits[0].date,
-      score: sc.score, rawScore: sc.raw, capped: sc.capped, caps: sc.caps, sub: sc.sub, counts: sc.counts, band: band,
-      findings: findings,
-      coverage: { budget: { files: R.LIMITS.maxFiles, bytes: R.LIMITS.maxTotalBytes, perFile: R.LIMITS.maxFileBytes }, relevantTotal: relevantTotal, analyzed: analyzed.length, skippedCounted: skipCount, treeTruncated: truncated, treeNote: treeNote, totalFiles: entries.length },
-      trimmedFindings: trimmed,
-      stats: { apiCalls: api.rate.used, fetchMs: fetchMs, filesFetched: picked.length, bytesAnalyzed: analyzed.reduce(function (n, a) { return n + a.bytes; }, 0), budgetBytes: budgetBytes, netErrors: netErrors },
-      analyzed: analyzed, skipped: skipped, skippedOther: skippedOther,
-      hosts: hostList, greenFlags: greenFlags(entries, repo, scopeRoot),
-      rate: { remaining: api.rate.remaining, limit: api.rate.limit, reset: api.rate.reset ? api.rate.reset * 1000 : null, used: api.rate.used },
-      blindSpots: R.BLIND_SPOTS, disclaimer: 'Automated scan, not an audit or guarantee.'
-    };
+  function scanLocal(rootDir, opts) {
+    opts = opts || {};
+    if (typeof require !== 'function') throw PushyError('LOCAL', 'A local scan runs in Node. The browser scanner uses scan().');
+    var fs = require('fs'), pathMod = require('path'), cp = require('child_process');
+    var root = pathMod.resolve(String(rootDir || '.'));
+    var dirStat; try { dirStat = fs.statSync(root); } catch (e) { throw PushyError('BAD_INPUT', 'No such directory: ' + rootDir); }
+    if (!dirStat.isDirectory()) throw PushyError('BAD_INPUT', 'path is not a directory: ' + rootDir);
+    var files = [];
+    (function walk(dir) {
+      var ents = fs.readdirSync(dir, { withFileTypes: true });
+      for (var i = 0; i < ents.length; i++) {
+        var ent = ents[i];
+        if (ent.isSymbolicLink()) continue;
+        var abs = pathMod.join(dir, ent.name);
+        var rel = pathMod.relative(root, abs).split(pathMod.sep).join('/');
+        if (ent.isDirectory()) {
+          if (ent.name === '.git') continue;
+          if (R.FILES.skipDirs.test(rel + '/')) continue;
+          walk(abs);
+        } else if (ent.isFile()) {
+          var size = 0; try { size = fs.statSync(abs).size; } catch (e2) { size = 0; }
+          files.push({ path: rel, size: size });
+        }
+      }
+    })(root);
+    var entries = files.map(function (f) { var e = classify(f.path, f.size); e.depth = f.path.split('/').length - 1; return e; });
+    if (!entries.length) throw PushyError('EMPTY', 'No files found in that folder.');
+    var prep = prepareEntries(entries);
+    var st = { skipped: prep.skipped, findings: prep.findings, analyzed: [], readmeText: '', readmePath: '', skillFm: {}, hostsAll: {}, hostsCode: {} };
+    prep.picked.forEach(function (e) {
+      var text = null;
+      try { text = fs.readFileSync(pathMod.join(root, e.path), 'utf8'); }
+      catch (err) { st.skipped.push({ path: e.path, reason: 'could not be read (' + err.message + ')', counts: true }); return; }
+      try { absorbFile(e, text, st); }
+      catch (err2) { st.skipped.push({ path: e.path, reason: 'analysis error (' + (err2 && err2.message || 'unknown') + ')', counts: true }); }
+    });
+    var now = opts.now || Date.now();
+    var eventRepo = null;
+    if (!opts.repo && process.env.GITHUB_EVENT_PATH) {
+      try { eventRepo = JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH, 'utf8')).repository || null; } catch (e3) { eventRepo = null; }
+    }
+    var repo = opts.repo || eventRepo || {};
+    var commits = Array.isArray(opts.commits) ? opts.commits : null;
+    if (!commits) {
+      commits = [];
+      try {
+        var top = cp.execFileSync('git', ['-C', root, 'rev-parse', '--show-toplevel'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+        if (pathMod.resolve(top) === root) {
+          var logOut = cp.execFileSync('git', ['-C', root, 'log', '-n', '30', '--format=%H%x09%aI%x09%an'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+          commits = logOut.split('\n').filter(Boolean).map(function (line) { var p = line.split('\t'); return { sha: p[0], date: p[1], author: p[2] || '?' }; });
+        }
+      } catch (e4) { commits = []; }
+    }
+    var authors = []; commits.forEach(function (c) { if (authors.indexOf(c.author) < 0) authors.push(c.author); });
+    var owner = opts.owner || (repo.owner && (repo.owner.login || repo.owner.name)) || '';
+    var repoName = opts.repoName || repo.name || '';
+    var sha = opts.sha || (!opts.repo && process.env.GITHUB_SHA) || (commits[0] && commits[0].sha) || '';
+    var ref = opts.ref || repo.default_branch || '';
+    return finishReport({
+      findings: st.findings, skipped: st.skipped, skippedOther: prep.skippedOther, analyzed: st.analyzed, entries: entries,
+      relevantTotal: prep.relevantTotal, truncated: false, treeNote: 'local checkout', repo: repo, commits: commits, authors: authors,
+      readmeText: st.readmeText, readmePath: st.readmePath, hostsAll: st.hostsAll, hostsCode: st.hostsCode, scopeRoot: true,
+      skillDirs: prep.skillDirs, skillFm: st.skillFm, now: now, owner: owner, repoName: repoName, ref: ref, subpath: '', sha: sha,
+      budgetBytes: prep.budgetBytes, pickedCount: prep.picked.length, fetchMs: 0, netErrors: 0, rate: { used: 0 }
+    });
   }
 
   function greenFlags(entries, repo, scopeRoot) {
@@ -472,7 +552,7 @@
     return siteUrl ? '[' + img + '](' + siteUrl + ')' : img;
   }
 
-  var api = { parseInput: parseInput, scan: scan, analyzeFile: analyzeFile, classify: classify, scoreFindings: scoreFindings, bandFor: bandFor, badgeSVG: badgeSVG, badgeMarkdown: badgeMarkdown, PushyError: PushyError, SEV_ORDER: SEV_ORDER, BAND_COLORS: BAND_COLORS };
+  var api = { parseInput: parseInput, scan: scan, scanLocal: scanLocal, analyzeFile: analyzeFile, classify: classify, scoreFindings: scoreFindings, bandFor: bandFor, badgeSVG: badgeSVG, badgeMarkdown: badgeMarkdown, PushyError: PushyError, SEV_ORDER: SEV_ORDER, BAND_COLORS: BAND_COLORS };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.Pushy = api;
 })(typeof window !== 'undefined' ? window : globalThis);

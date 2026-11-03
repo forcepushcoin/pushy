@@ -139,11 +139,68 @@ Then open [http://127.0.0.1:8000/score/](http://127.0.0.1:8000/score/). No insta
 
 Node 18+ can load the engine for a rules check (`require('./score/pushy.js')`). See [CONTRIBUTING.md](CONTRIBUTING.md) for a working example.
 
+## Use in GitHub Actions
+
+`uses: forcepushcoin/pushy@v1` runs the same ruleset on the files in the workflow checkout. It does not download the repo again and it does not upload source. On a `pull_request` it posts or updates one comment, found by the hidden marker `<!-- pushy-score -->`. The job fails only when `fail-under` is set and the score is below that number.
+
+This works on private repositories. The job runs in your account, reads the checkout on the runner, and talks to GitHub only to post the comment (and to read the list of changed file names). Pushy has no server in that path.
+
+```yaml
+name: Pushy
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  pushy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: forcepushcoin/pushy@v1
+        with:
+          fail-under: '70'
+```
+
+| Input | Default | What it does |
+| --- | --- | --- |
+| `path` | `.` | Directory to scan, relative to the workspace. |
+| `fail-under` | empty | Fail when the score is below this number. Empty never fails on the score. |
+| `comment` | `true` | Post or update one sticky pull request comment. Ignored when the event is not a pull request. |
+| `github-token` | `${{ github.token }}` | Used for the comment and the changed-file list. |
+
+| Output | What it is |
+| --- | --- |
+| `score` | Integer from 0 to 100. |
+| `band` | `green`, `yellow`, `orange`, `red`, or `gray`. |
+| `report-path` | Path of `pushy-report.json` in the workspace. |
+
+The comment for [`fixtures/evil`](fixtures/evil) (an AWS key, `curl | bash`, a prompt-override line, and a zero-width character) looks like this. The full sample is in [docs/ACTION.md](docs/ACTION.md).
+
+```markdown
+<!-- pushy-score -->
+## 🐹 35/100 · Do NOT force push this 🔴
+
+Serious red flags. Do not install or run this without a careful manual review.
+
+| Severity | Rule | Where | Fix |
+| --- | --- | --- | --- |
+| critical 🆕 | `S001` | [`scripts/setup.sh:2`](https://github.com/fixture/skills/blob/0123456789abcdef0123456789abcdef01234567/scripts/setup.sh#L2) | Revoke the key in AWS IAM now, rotate it, and load it from an environment variable or secret store. |
+| high 🆕 | `X001` | [`scripts/setup.sh:3`](https://github.com/fixture/skills/blob/0123456789abcdef0123456789abcdef01234567/scripts/setup.sh#L3) | Download, pin a checksum or version, read the script, then run it. Prefer a package manager with lockfiles. |
+
+Automated scan, not an audit · Pushy needs no token
+```
+
+🆕 marks a finding in a file the pull request changes. More detail is in [docs/ACTION.md](docs/ACTION.md).
+
 ## Tools
 
 | Tool | Status |
 | --- | --- |
 | Pushy Score | Live |
+| Pushy GitHub Action | Live |
 | AI deep scan | Building |
 | Commit Roast Card | Planned |
 | Ship Log | Planned |
@@ -176,6 +233,7 @@ Pushy Score is not affiliated with GitHub, Anthropic, or any scanner vendor.
 | Path | What it is |
 | --- | --- |
 | [`score/`](score/) | Pushy Score v1.1. Open `index.html` via a local server. |
+| [`action.yml`](action.yml) | GitHub Action. `uses: forcepushcoin/pushy@v1`. |
 | [`assets/`](assets/) | `pp-avatar.jpg` (mascot on the scanner and at the top of this page) and `pp.jpg` (the same hamster on a CRT). |
 | [`docs/RULES.md`](docs/RULES.md) | Every rule id, severity, category, and description. |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | How to add a rule, with a test and false-positive guidance. |

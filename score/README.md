@@ -5,7 +5,7 @@ Automated scan, not an audit or guarantee.
 
 ## Files
 - `index.html`, `score.css`, `app.js`: UI (progress bar, results, blind spots, compact disclaimer with a collapsed "details" list)
-- `pushy.js`: scan engine (GitHub API, SHA-pinned jsDelivr/raw fetches, scoring, badge)
+- `pushy.js`: scan engine (GitHub API, SHA-pinned jsDelivr/raw fetches, scoring, badge). `scanLocal(dir)` reads a local checkout with the same rules, limits, and scoring. The GitHub Action uses that. The page still calls `scan()`.
 - `rules.js`: the open, versioned ruleset (`pushy-rules` **1.1.0**) and the scan LIMITS. Change a rule -> bump version + CHANGELOG
 - `example-badge.svg`: sample badge
 

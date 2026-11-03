@@ -1,0 +1,65 @@
+name: test
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Unit tests
+        run: node --test
+
+  action:
+    runs-on: ubuntu-latest
+    needs: unit
+    steps:
+      - uses: actions/checkout@v4
+      - name: Scan the clean fixture
+        id: clean
+        uses: ./
+        with:
+          path: fixtures/clean
+          comment: 'false'
+      - name: Scan the evil fixture
+        id: evil
+        uses: ./
+        with:
+          path: fixtures/evil
+          comment: 'false'
+      - name: fail-under trips on the evil fixture
+        id: gated
+        continue-on-error: true
+        uses: ./
+        with:
+          path: fixtures/evil
+          comment: 'false'
+          fail-under: '80'
+      - name: Check action outputs
+        env:
+          CLEAN_SCORE: ${{ steps.clean.outputs.score }}
+          CLEAN_BAND: ${{ steps.clean.outputs.band }}
+          EVIL_SCORE: ${{ steps.evil.outputs.score }}
+          EVIL_BAND: ${{ steps.evil.outputs.band }}
+          EVIL_REPORT: ${{ steps.evil.outputs.report-path }}
+          GATED: ${{ steps.gated.outcome }}
+        run: |
+          set -eu
+          echo "clean ${CLEAN_SCORE} ${CLEAN_BAND}"
+          echo "evil ${EVIL_SCORE} ${EVIL_BAND} ${EVIL_REPORT}"
+          test "${CLEAN_SCORE}" -ge 85
+          test "${CLEAN_BAND}" = "green"
+          test "${EVIL_SCORE}" -lt 45
+          test "${EVIL_BAND}" = "red"
+          test "${GATED}" = "failure"
+          test -n "${EVIL_REPORT}"
+          test -f "${EVIL_REPORT}"
+          node -e "const r=require(process.argv[1]); if (r.score>=45||r.band.key!=='red') process.exit(1)" "${EVIL_REPORT}"

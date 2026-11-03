@@ -1,0 +1,33 @@
+name: Pushy Score
+description: Score a checkout of AI skills, prompt libraries, or MCP servers. Posts one sticky pull request comment. Does not upload your code.
+author: forcepushcoin
+branding:
+  icon: shield
+  color: red
+inputs:
+  path:
+    description: Directory to scan, relative to the workspace. Default is the whole checkout.
+    required: false
+    default: '.'
+  fail-under:
+    description: Fail the job when the score is below this number. Empty means the score never fails the job.
+    required: false
+    default: ''
+  comment:
+    description: On pull_request, post or update one sticky comment. true or false.
+    required: false
+    default: 'true'
+  github-token:
+    description: Token used only to post or update the pull request comment. The scan itself does not send file contents anywhere.
+    required: false
+    default: ${{ github.token }}
+outputs:
+  score:
+    description: Integer score from 0 to 100.
+  band:
+    description: Band key. One of green, yellow, orange, red, gray.
+  report-path:
+    description: Workspace path of the JSON report.
+runs:
+  using: node20
+  main: action/index.js
