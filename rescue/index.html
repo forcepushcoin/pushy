@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pushy Rescue — turn scan findings into fixes | $FORCEPUSH</title>
+<meta name="description" content="Paste a public GitHub repo. Pushy Rescue runs the Pushy Score scan and turns each finding into a concrete fix: a downloadable .patch for mechanical edits and a Rescue plan for the rest. Free, client-side, no backend. Suggestions are rule-based, not guaranteed safe.">
+<meta name="theme-color" content="#0d1117">
+<link rel="icon" type="image/jpeg" href="../assets/pp-avatar.jpg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="rescue.css">
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="../"><img src="../assets/pp-avatar.jpg" alt="" width="30" height="30">$FORCEPUSH</a>
+    <ul>
+      <li><a href="../">Home</a></li>
+      <li><a href="../score/">Pushy Score</a></li>
+      <li><a href="../roast/">Roast</a></li>
+      <li><a href="../shiplog/">Ship Log</a></li>
+      <li><a href="./" class="on" aria-current="page">Rescue</a></li>
+      <li><a href="../bounties/">Bounties</a></li>
+      <li><a href="https://github.com/forcepushcoin/pushy" target="_blank" rel="noopener noreferrer" class="ext">Source</a></li>
+    </ul>
+  </div>
+</nav>
+
+<header class="hero" id="top">
+  <div class="wrap">
+    <h1><span>Pushy</span> Rescue <span class="pill live">v1 · free</span></h1>
+    <p class="lead">Paste a <b>public GitHub repo</b>. Rescue runs the <a href="../score/">Pushy Score</a> scan, then gives every finding a <b>concrete fix</b>: a <b>.patch file</b> for edits a machine can make, and a <b>Rescue plan</b> for the rest. It also shows a <b>projected score</b> if you apply the patch. It runs <b>in your browser</b>: no account, no backend, no LLM.</p>
+
+    <div class="term">
+      <div class="bar"><i></i><i></i><i></i><span>pushy — what would fix this repo?</span></div>
+      <form class="scanform" id="form" autocomplete="off">
+        <span class="ps">$ pushy rescue</span>
+        <input type="text" id="repo" name="repo" placeholder="github.com/owner/repo  (or owner/repo)" aria-label="GitHub repository" spellcheck="false" autocapitalize="off">
+        <button class="btn primary" id="go" type="submit">Rescue</button>
+      </form>
+    </div>
+
+    <div class="chips" id="examples"><small>try:</small></div>
+
+    <details class="tok">
+      <summary>Hit GitHub's rate limit? Add an optional token</summary>
+      <p style="margin:8px 0 0">Anonymous GitHub API access is limited to <b>60 requests/hour per IP</b>; a scan uses about 4. A token (no scopes needed) raises that to 5,000. It stays in this tab's memory, is sent only to <code>api.github.com</code>, and is never saved.</p>
+      <input type="password" id="token" placeholder="github_pat_… (optional)" autocomplete="off" spellcheck="false" aria-label="Optional GitHub token">
+    </details>
+
+    <div class="always"><b>Suggestions, not guarantees.</b> Edits are made by rules, not reviewed by a person. Read every hunk and run your tests before you commit. The real score always comes from <a href="../score/">Pushy Score</a>.</div>
+  </div>
+</header>
+
+<section id="progress" hidden>
+  <div class="wrap">
+    <div class="term"><div class="bar"><i></i><i></i><i></i><span id="progtitle">looking for something to rescue…</span></div>
+      <div class="pbar"><div class="pbar-top"><b id="pbar-msg">Looking around…</b><span id="pbar-n"></span></div><div class="pbar-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="pbar-track"><span id="pbar-fill" style="width:3%"></span></div><div class="pbar-sub" id="pbar-sub"></div></div>
+    </div>
+  </div>
+</section>
+
+<section id="error" hidden><div class="wrap" id="errbox"></div></section>
+
+<section id="result" hidden>
+  <div class="wrap" id="out"></div>
+</section>
+
+<section id="how">
+  <div class="wrap">
+    <h2><span class="c">// </span>How it works</h2>
+    <p class="sub">The same scan as Pushy Score, plus a fix for each finding.</p>
+    <div class="cards">
+      <div class="card"><h3>1. Scan</h3><p>Reads the repo with the public GitHub API (about 4 calls) and runs the Pushy Score rules in your browser. Your real score comes out of that step and is never changed.</p></div>
+      <div class="card"><h3>2. Fix</h3><p>Line edits where a rule can make one safely (swap a secret for an env var, pin a force-push, strip hidden characters). Everything else becomes a checklist step. Files that were not fully fetched or have mixed line endings get no patch.</p></div>
+      <div class="card"><h3>3. Re-scan</h3><p>Rescue runs the same rules on the patched files. The result is a <b>projected</b> score, a what-if, and it counts every edit as done. Download the .patch, read it, apply it with <code>git apply</code>.</p></div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p class="foot"><b>Suggestions, not guarantees · Basic tools are free and never need the token</b></p>
+    <p class="copy">Pushy Rescue is not affiliated with GitHub or any repo owner. Only public data is read, nothing is stored on a server. Paying with the token never changes a score. $FORCEPUSH is a meme coin, NFA.<br><a href="../">← back to $FORCEPUSH</a> · <a href="../score/">Pushy Score</a> · <a href="../roast/">Roast</a> · <a href="../shiplog/">Ship Log</a> · <a href="../bounties/">Bounties</a> 🐹🔴</p>
+  </div>
+</footer>
+<div class="toast" id="toast" role="status"></div>
+
+<script src="../score/rules.js"></script>
+<script src="../score/pushy.js"></script>
+<script src="rescue.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

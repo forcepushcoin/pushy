@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bounty Board — open Pushy bounties | $FORCEPUSH</title>
+<meta name="description" content="Open bounties for Pushy, read live from GitHub issues labelled bounty: new rules, false-positive fixes, verified risky-repo reports and tool features. Free, client-side, no backend. Payouts are planned at launch, not guaranteed.">
+<meta name="theme-color" content="#0d1117">
+<link rel="icon" type="image/jpeg" href="../assets/pp-avatar.jpg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="bounties.css">
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="../"><img src="../assets/pp-avatar.jpg" alt="" width="30" height="30">$FORCEPUSH</a>
+    <ul>
+      <li><a href="../">Home</a></li>
+      <li><a href="../score/">Pushy Score</a></li>
+      <li><a href="../roast/">Roast</a></li>
+      <li><a href="../shiplog/">Ship Log</a></li>
+      <li><a href="../rescue/">Rescue</a></li>
+      <li><a href="./" class="on" aria-current="page">Bounties</a></li>
+      <li><a href="https://github.com/forcepushcoin/pushy" target="_blank" rel="noopener noreferrer" class="ext">Source</a></li>
+    </ul>
+  </div>
+</nav>
+
+<header class="hero" id="top">
+  <div class="wrap">
+    <h1>Bounty <span>Board</span> <span class="pill live">board live</span></h1>
+    <p class="lead">Open bounties for Pushy: <b>new rules</b>, <b>false-positive fixes</b>, <b>verified risky-repo reports</b> and <b>tool features</b>. The list is read live from GitHub issues labelled <code>bounty</code> in your browser. <b>Payouts are planned at launch</b> from a public pool wallet, not guaranteed.</p>
+
+    <div class="pool" id="pool"></div>
+
+    <div class="actions">
+      <a class="btn primary sm" href="https://github.com/forcepushcoin/pushy/issues/new?template=bounty.yml" target="_blank" rel="noopener noreferrer">Submit a bounty</a>
+      <a class="btn ghost sm" href="https://github.com/forcepushcoin/pushy/blob/main/BOUNTIES.md" target="_blank" rel="noopener noreferrer">Read BOUNTIES.md</a>
+      <button class="btn ghost sm" id="refresh" type="button">Refresh</button>
+    </div>
+
+    <details class="tok">
+      <summary>Hit GitHub's rate limit? Add an optional token</summary>
+      <p style="margin:8px 0 0">This page uses 1 anonymous GitHub API request per load (60 per hour per IP) and caches the answer for 10 minutes. A token (no scopes needed) raises the limit. It stays in this tab's memory, goes only to <code>api.github.com</code>, and is never saved.</p>
+      <input type="password" id="token" placeholder="github_pat_… (optional)" autocomplete="off" spellcheck="false" aria-label="Optional GitHub token">
+    </details>
+
+    <div class="always"><b>Paying or holding $FORCEPUSH never changes a score,</b> and bounties cannot raise or lower anyone's score. Amounts are only what the issue says; the maintainer decision is final.</div>
+  </div>
+</header>
+
+<section id="progress" hidden>
+  <div class="wrap"><div class="term"><div class="bar"><i></i><i></i><i></i><span>reading issues…</span></div><div class="pbar"><div class="pbar-top"><b>Asking GitHub for bounty issues…</b></div><div class="pbar-track"><span style="width:60%"></span></div></div></div></div>
+</section>
+
+<section id="error" hidden><div class="wrap" id="errbox"></div></section>
+
+<section id="result" hidden>
+  <div class="wrap" id="out"></div>
+</section>
+
+<section id="how">
+  <div class="wrap">
+    <h2><span class="c">// </span>How it works</h2>
+    <p class="sub">GitHub issues are the database. No server, no accounts.</p>
+    <div class="cards">
+      <div class="card"><h3>1. Submit</h3><p>Open an issue with the Bounty template. It gets the <code>bounty</code> label and shows up here as <b>proposed</b>. A <code>Reward: 500 USDC</code> line in the issue is shown as "as written by author".</p></div>
+      <div class="card"><h3>2. Review</h3><p>A maintainer labels it <code>bounty-accepted</code> (shown as <b>open</b>), <code>bounty-claimed</code> or <code>bounty-paid</code>. A <code>reward: 500 USDC</code> <b>label</b> is a confirmed amount, because only maintainers can set labels.</p></div>
+      <div class="card"><h3>3. Payout</h3><p>Planned at launch in $FORCEPUSH from the public pool wallet, with an address you give on the issue. Nothing is payable until the wallet is published. Full rules in <a href="https://github.com/forcepushcoin/pushy/blob/main/BOUNTIES.md" target="_blank" rel="noopener noreferrer">BOUNTIES.md</a>.</p></div>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p class="foot"><b>No payout is guaranteed · Basic tools are free and never need the token</b></p>
+    <p class="copy">The bounty board is not affiliated with GitHub. Only public issue data is read, nothing is stored on a server. $FORCEPUSH is a meme coin: its value can go to zero, and nothing here promises a return. NFA.<br><a href="../">← back to $FORCEPUSH</a> · <a href="../score/">Pushy Score</a> · <a href="../roast/">Roast</a> · <a href="../shiplog/">Ship Log</a> · <a href="../rescue/">Rescue</a> 🐹🔴</p>
+  </div>
+</footer>
+<div class="toast" id="toast" role="status"></div>
+
+<script src="bounties.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

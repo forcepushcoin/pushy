@@ -3,6 +3,7 @@
  * Automated scan, not an audit or guarantee. Rules live in rules.js.
  * Works in browsers (GitHub Pages) and Node 18+ (for tests and the GitHub Action).
  * No dependencies, no backend. `scan` fetches a public GitHub repo. `scanLocal` reads a directory on disk.
+ * `keepContext: true` makes either one attach `report.context` (file texts) so `rescore(context, overrides)` can re-run the same engine on edited files (used by Pushy Rescue). It never changes a score.
  */
 (function (root) {
   'use strict';
@@ -263,6 +264,7 @@
     if (text.indexOf('\u0000') >= 0) { st.skipped.push({ path: e.path, reason: 'contains binary data', counts: true }); return; }
     if (text.length > R.LIMITS.maxFileBytes * 2) { st.skipped.push({ path: e.path, reason: 'too large after download', counts: true }); return; }
     var f = { path: e.path, text: text, kind: e.kind, entry: e };
+    if (st.texts) st.texts[e.path] = text;
     st.analyzed.push({ path: e.path, bytes: text.length, kind: e.kind, prio: e.prio });
     if (/^readme(\.[a-z]+)?$/i.test(e.name) && e.depth === 0) { st.readmeText = text; st.readmePath = e.path; }
     if (/(^|\/)SKILL\.md$/i.test(e.path)) st.skillFm[e.path] = R.helpers.frontmatter(text);
@@ -318,6 +320,52 @@
       rate: { remaining: rate.remaining != null ? rate.remaining : null, limit: rate.limit != null ? rate.limit : null, reset: rate.reset ? rate.reset * 1000 : null, used: rate.used || 0 },
       blindSpots: R.BLIND_SPOTS, disclaimer: 'Automated scan, not an audit or guarantee.'
     };
+  }
+
+  /* ---------------------------------------------------------- rescore (what-if) */
+  function byteLen(t) {
+    if (typeof TextEncoder !== 'undefined') return new TextEncoder().encode(t).length;
+    if (typeof Buffer !== 'undefined') return Buffer.byteLength(t, 'utf8');
+    return unescape(encodeURIComponent(t)).length;
+  }
+  function buildContext(st, prep, entries, meta) {
+    var picked = {}; prep.picked.forEach(function (e) { picked[e.path] = 1; });
+    var unreadable = {};
+    st.skipped.forEach(function (x) { if (picked[x.path] && x.counts) unreadable[x.path] = x.reason; });
+    return {
+      entries: entries.map(function (e) { var c = {}; for (var k in e) c[k] = e[k]; delete c.prio; return c; }),
+      texts: st.texts, unreadable: unreadable, meta: meta
+    };
+  }
+  /* Re-run the whole engine on the same repo with some files replaced (or added). `overrides` = { path: newText }.
+     Returns a normal report. With no overrides it reproduces the original report, so a projected score is comparable. */
+  function rescore(ctx, overrides) {
+    if (!ctx || !ctx.entries || !ctx.texts) throw PushyError('BAD_INPUT', 'rescore needs the context from scan(..., { keepContext: true }).');
+    overrides = overrides || {};
+    var m = ctx.meta, prefix = m.subpath ? m.subpath + '/' : '';
+    var entries = ctx.entries.map(function (e) { var c = {}; for (var k in e) c[k] = e[k]; return c; });
+    var byPath = {}; entries.forEach(function (e) { byPath[e.path] = e; });
+    Object.keys(overrides).forEach(function (p) {
+      var t = overrides[p]; if (typeof t !== 'string') return;
+      var size = byteLen(t);
+      if (byPath[p]) byPath[p].size = size;
+      else { var e = classify(p, size); e.depth = p.slice(prefix.length).split('/').length - 1; entries.push(e); byPath[p] = e; }
+    });
+    var prep = prepareEntries(entries);
+    var st = { skipped: prep.skipped, findings: prep.findings, analyzed: [], readmeText: '', readmePath: '', skillFm: {}, hostsAll: {}, hostsCode: {} };
+    prep.picked.forEach(function (e) {
+      var text = Object.prototype.hasOwnProperty.call(overrides, e.path) ? overrides[e.path] : ctx.texts[e.path];
+      if (typeof text !== 'string') { st.skipped.push({ path: e.path, reason: ctx.unreadable[e.path] || 'could not be read', counts: true }); return; }
+      try { absorbFile(e, text, st); }
+      catch (err) { st.skipped.push({ path: e.path, reason: 'analysis error (' + (err && err.message || 'unknown') + ')', counts: true }); }
+    });
+    return finishReport({
+      findings: st.findings, skipped: st.skipped, skippedOther: prep.skippedOther, analyzed: st.analyzed, entries: entries,
+      relevantTotal: prep.relevantTotal, truncated: m.truncated, treeNote: m.treeNote, repo: m.repo, commits: m.commits, authors: m.authors,
+      readmeText: st.readmeText, readmePath: st.readmePath, hostsAll: st.hostsAll, hostsCode: st.hostsCode, scopeRoot: m.scopeRoot,
+      skillDirs: prep.skillDirs, skillFm: st.skillFm, now: m.now, owner: m.owner, repoName: m.repoName, ref: m.ref, subpath: m.subpath, sha: m.sha,
+      budgetBytes: prep.budgetBytes, pickedCount: prep.picked.length, fetchMs: 0, netErrors: m.netErrors || 0, rate: { used: 0 }
+    });
   }
 
   /* ---------------------------------------------------------- main scan */
@@ -385,7 +433,7 @@
     var scopeRoot = !subpath;
 
     var prep = prepareEntries(entries);
-    var st = { skipped: prep.skipped, findings: prep.findings, analyzed: [], readmeText: '', readmePath: '', skillFm: {}, hostsAll: {}, hostsCode: {} };
+    var st = { skipped: prep.skipped, findings: prep.findings, analyzed: [], readmeText: '', readmePath: '', skillFm: {}, hostsAll: {}, hostsCode: {}, texts: opts.keepContext ? {} : null };
     var picked = prep.picked, budgetBytes = prep.budgetBytes, L = R.LIMITS;
 
     // fetch bodies (pool) + analyze as they arrive, yielding to the UI
@@ -431,13 +479,15 @@
     var fetchMs = Math.round(now0() - t0);
     log('Running ' + (R.lineRules.length + R.specialRules.length + R.fileRules.length + R.pathRules.length + R.repoRules.length) + ' rules…');
     await sleep(0);
-    return finishReport({
+    var rep = finishReport({
       findings: st.findings, skipped: st.skipped, skippedOther: prep.skippedOther, analyzed: st.analyzed, entries: entries,
       relevantTotal: prep.relevantTotal, truncated: truncated, treeNote: treeNote, repo: repo, commits: commits, authors: authors,
       readmeText: st.readmeText, readmePath: st.readmePath, hostsAll: st.hostsAll, hostsCode: st.hostsCode, scopeRoot: scopeRoot,
       skillDirs: prep.skillDirs, skillFm: st.skillFm, now: now, owner: o, repoName: r, ref: ref, subpath: subpath, sha: sha,
       budgetBytes: budgetBytes, pickedCount: picked.length, fetchMs: fetchMs, netErrors: netErrors, rate: api.rate
     });
+    if (opts.keepContext) rep.context = buildContext(st, prep, entries, { repo: repo, commits: commits, authors: authors, now: now, owner: o, repoName: r, ref: ref, subpath: subpath, sha: sha, scopeRoot: scopeRoot, truncated: truncated, treeNote: treeNote, netErrors: netErrors });
+    return rep;
   }
 
   function scanLocal(rootDir, opts) {
@@ -468,7 +518,7 @@
     var entries = files.map(function (f) { var e = classify(f.path, f.size); e.depth = f.path.split('/').length - 1; return e; });
     if (!entries.length) throw PushyError('EMPTY', 'No files found in that folder.');
     var prep = prepareEntries(entries);
-    var st = { skipped: prep.skipped, findings: prep.findings, analyzed: [], readmeText: '', readmePath: '', skillFm: {}, hostsAll: {}, hostsCode: {} };
+    var st = { skipped: prep.skipped, findings: prep.findings, analyzed: [], readmeText: '', readmePath: '', skillFm: {}, hostsAll: {}, hostsCode: {}, texts: opts.keepContext ? {} : null };
     prep.picked.forEach(function (e) {
       var text = null;
       try { text = fs.readFileSync(pathMod.join(root, e.path), 'utf8'); }
@@ -498,13 +548,15 @@
     var repoName = opts.repoName || repo.name || '';
     var sha = opts.sha || (!opts.repo && process.env.GITHUB_SHA) || (commits[0] && commits[0].sha) || '';
     var ref = opts.ref || repo.default_branch || '';
-    return finishReport({
+    var rep = finishReport({
       findings: st.findings, skipped: st.skipped, skippedOther: prep.skippedOther, analyzed: st.analyzed, entries: entries,
       relevantTotal: prep.relevantTotal, truncated: false, treeNote: 'local checkout', repo: repo, commits: commits, authors: authors,
       readmeText: st.readmeText, readmePath: st.readmePath, hostsAll: st.hostsAll, hostsCode: st.hostsCode, scopeRoot: true,
       skillDirs: prep.skillDirs, skillFm: st.skillFm, now: now, owner: owner, repoName: repoName, ref: ref, subpath: '', sha: sha,
       budgetBytes: prep.budgetBytes, pickedCount: prep.picked.length, fetchMs: 0, netErrors: 0, rate: { used: 0 }
     });
+    if (opts.keepContext) rep.context = buildContext(st, prep, entries, { repo: repo, commits: commits, authors: authors, now: now, owner: owner, repoName: repoName, ref: ref, subpath: '', sha: sha, scopeRoot: true, truncated: false, treeNote: 'local checkout', netErrors: 0 });
+    return rep;
   }
 
   function greenFlags(entries, repo, scopeRoot) {
@@ -552,7 +604,7 @@
     return siteUrl ? '[' + img + '](' + siteUrl + ')' : img;
   }
 
-  var api = { parseInput: parseInput, scan: scan, scanLocal: scanLocal, analyzeFile: analyzeFile, classify: classify, scoreFindings: scoreFindings, bandFor: bandFor, badgeSVG: badgeSVG, badgeMarkdown: badgeMarkdown, PushyError: PushyError, SEV_ORDER: SEV_ORDER, BAND_COLORS: BAND_COLORS };
+  var api = { parseInput: parseInput, scan: scan, scanLocal: scanLocal, rescore: rescore, analyzeFile: analyzeFile, classify: classify, scoreFindings: scoreFindings, bandFor: bandFor, badgeSVG: badgeSVG, badgeMarkdown: badgeMarkdown, PushyError: PushyError, SEV_ORDER: SEV_ORDER, BAND_COLORS: BAND_COLORS };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   root.Pushy = api;
 })(typeof window !== 'undefined' ? window : globalThis);

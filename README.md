@@ -206,7 +206,8 @@ Automated scan, not an audit · Pushy needs no token
 | [Commit Roast Card](roast/) | Live |
 | [AI Deep Scan](docs/DEEP_SCAN.md) | Live in the Action, bring your own key. Token payments later |
 | [Ship Log](https://forcepushcoin.github.io/shiplog/) | Live |
-| Rescue | Planned |
+| [Rescue](rescue/) | Live. Free, client-side |
+| [Bounty board](bounties/) | Board live. Payouts planned at launch |
 
 **[Commit Roast Card](roast/)** (`roast/`): paste a public repo, get a funny, Pushy-voiced roast of its commit habits and a shareable 1200×630 card. Free, client-side, no backend, no account. Just for fun, not a code review. Live at <https://forcepushcoin.github.io/roast/>.
 
@@ -216,7 +217,9 @@ Automated scan, not an audit · Pushy needs no token
 
 **[Ship Log](shiplog/)**: paste a public repo and see what it shipped in the last 7, 30, or 90 days (releases, merged pull requests, commits). Free, client-side, no backend. Live at <https://forcepushcoin.github.io/shiplog/>.
 
-**[Bounties](BOUNTIES.md)** are planned at launch. The bounty wallet does not exist yet, so nothing is payable today.
+**[Rescue](docs/RESCUE.md)** (`rescue/`): paste a public repo and Pushy runs the Score scan, then gives each finding a concrete fix: a downloadable unified-diff `.patch` for edits a rule can make (swap a committed secret for an env var, replace `curl | bash` with a checksum-gated download, strip hidden Unicode, pin `git push --force`), and a Markdown **Rescue plan** for the rest. It also shows a **projected score** by re-running the same engine on the patched files. That number is a what-if, never a score, and the real score is not changed. Suggestions are rule-based, not guaranteed safe: read every hunk. Free, client-side, no backend. Live at <https://forcepushcoin.github.io/rescue/>.
+
+**[Bounty board](bounties/)** (`bounties/`): a page that lists issues labelled `bounty` in this repo (open and recently closed) with status and reward, read live from the GitHub API in your browser. The board is live. **Payouts are planned at launch**: the pool wallet does not exist yet, so nothing is payable today. See [BOUNTIES.md](BOUNTIES.md) and <https://forcepushcoin.github.io/bounties/>.
 
 ## Limitations
 
@@ -247,6 +250,8 @@ Pushy Score is not affiliated with GitHub, Anthropic, or any scanner vendor.
 | [`score/`](score/) | Pushy Score v1.1. Open `index.html` via a local server. |
 | [`roast/`](roast/) | Commit Roast Card. Open `index.html` via a local server. |
 | [`shiplog/`](shiplog/) | Ship Log. Open `index.html` via a local server. |
+| [`rescue/`](rescue/) | Pushy Rescue: fixes, `.patch` and plan for Score findings. See [`docs/RESCUE.md`](docs/RESCUE.md). |
+| [`bounties/`](bounties/) | Bounty board page (reads `bounty` issues). Payouts planned at launch. |
 | [`action.yml`](action.yml) | GitHub Action. `uses: forcepushcoin/pushy@v1`. |
 | [`action/watch.js`](action/watch.js) | Watch mode of the action. See [`docs/WATCH.md`](docs/WATCH.md). |
 | [`action/deep.js`](action/deep.js) | Optional AI Deep Scan (your key). See [`docs/DEEP_SCAN.md`](docs/DEEP_SCAN.md). |
