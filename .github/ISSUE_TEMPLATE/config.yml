@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Security report
+    url: https://github.com/forcepushcoin/pushy/security/advisories/new
+    about: Report a vulnerability in private. Do not file exploit details as a public issue.

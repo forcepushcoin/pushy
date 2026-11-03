@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pushy Score — free risk scan for AI agent skills &amp; MCP servers | $FORCEPUSH</title>
+<meta name="description" content="Pushy Score: a free, client-side, rule-based risk scan for public GitHub repos of AI agent skills, MCP servers and prompt libraries. Automated scan, not an audit or guarantee.">
+<meta name="theme-color" content="#0b1a3a">
+<link rel="icon" href="../assets/logo.jpg">
+<link rel="stylesheet" href="score.css">
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="../"><img src="../assets/logo.jpg" alt="" width="30" height="30">$FORCEPUSH</a>
+    <ul>
+      <li><a href="#top">Scan</a></li>
+      <li><a href="#how">How it works</a></li>
+      <li><a href="#rules">Ruleset</a></li>
+      <li><a href="../#roadmap">Roadmap</a></li>
+      <li><a href="../">Home</a></li>
+    </ul>
+  </div>
+</nav>
+
+<header class="hero" id="top">
+  <div class="wrap">
+    <h1><span>Pushy</span> Score <span class="pill live">v1 · free</span></h1>
+    <p class="lead">A quick, rule-based risk scan for <b>public GitHub repos</b> of AI agent skills, MCP servers and prompt libraries. Paste a repo, get a <b>0–100 score</b>, the findings with file and line, and a README badge. It runs <b>in your browser</b>: no account, no backend, nothing uploaded to us.</p>
+
+    <div class="term">
+      <div class="bar"><i></i><i></i><i></i><span>pushy — scan a public repo</span></div>
+      <form class="scanform" id="form" autocomplete="off">
+        <span class="ps">$ pushy scan</span>
+        <input type="text" id="repo" name="repo" placeholder="github.com/owner/repo  (or …/tree/main/some-folder)" aria-label="GitHub repository URL" spellcheck="false" autocapitalize="off">
+        <button class="btn primary" id="go" type="submit">Scan</button>
+      </form>
+    </div>
+
+    <div class="chips" id="examples"><small>try:</small></div>
+
+    <details class="tok">
+      <summary>Hit GitHub's rate limit? Add an optional token</summary>
+      <p style="margin:8px 0 0">Anonymous GitHub API access is limited to <b>60 requests/hour per IP</b>; each scan uses about 4. A token (no scopes needed) raises that to 5,000. It stays in this tab's memory, is sent only to <code>api.github.com</code>, and is never saved.</p>
+      <input type="password" id="token" placeholder="github_pat_… (optional)" autocomplete="off" spellcheck="false" aria-label="Optional GitHub token">
+    </details>
+
+    <div class="always"><b>Automated scan, not an audit or guarantee.</b> A high score means "none of our rules fired", not "safe". Read the <a href="#blind">blind spots</a> and the code before you install anything.</div>
+  </div>
+</header>
+
+<section id="progress" hidden>
+  <div class="wrap">
+    <div class="term"><div class="bar"><i></i><i></i><i></i><span>scanning…</span></div><pre id="log" aria-live="polite"></pre></div>
+  </div>
+</section>
+
+<section id="error" hidden><div class="wrap" id="errbox"></div></section>
+
+<section id="result" hidden>
+  <div class="wrap" id="resultbox"></div>
+</section>
+
+<section id="how">
+  <div class="wrap">
+    <h2><span class="c">// </span>How it works</h2>
+    <p class="sub">Four GitHub API calls, a handful of file downloads, and a pile of regexes. That's it, and that's the point: you can read all of it.</p>
+    <div class="cards">
+      <div class="card"><h3>1. Pin a commit</h3><p>Reads repo metadata and the latest commit, then lists every file at that exact SHA. Every file body is fetched from a SHA-pinned URL (jsDelivr, falling back to raw.githubusercontent), so the result describes one commit, not a moving target.</p></div>
+      <div class="card"><h3>2. Pick the files that matter</h3><p>Up to <b>40</b> files, <b>200 KB</b> each, prioritising SKILL.md, AGENTS.md, CLAUDE.md, .cursorrules, MCP manifests, package.json, scripts and prompt files. Anything skipped is listed. Big folder? Paste a <code>/tree/…/folder</code> URL.</p></div>
+      <div class="card"><h3>3. Run the ruleset</h3><p>Secrets, dangerous exec, network exfil, prompt-injection strings, hidden Unicode, encoded blobs, remote-instruction fetches, permissions, docs and maintenance signals. Open, versioned, in <code>rules.js</code>.</p></div>
+      <div class="card"><h3>4. Score, cap, badge</h3><p>Four sub-scores roll into one number. Critical findings and skipped files <b>cap</b> the score so gaps can't hide behind a green number. Download a static SVG badge stamped with commit, date and ruleset.</p></div>
+    </div>
+    <div class="note"><b>Why a cap?</b> Researchers have shown that skill scanners can be fooled with padding, bytecode, archives and prompt-injected judges. A scanner that quietly skips files and still says "100" is lying by omission, so Pushy lists what it didn't read and lowers the score accordingly.</div>
+  </div>
+</section>
+
+<section id="rules">
+  <div class="wrap">
+    <h2><span class="c">// </span>Ruleset <span class="pill" id="rv"></span></h2>
+    <p class="sub">Every rule Pushy runs. Severity is before the "docs / test / example path" downgrade. Source: <a href="rules.js">rules.js</a>.</p>
+    <div class="tablewrap"><table id="ruletable"><thead><tr><th>ID</th><th>Category</th><th>Severity</th><th>What it looks for</th></tr></thead><tbody></tbody></table></div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <div class="disc">
+      <h2>⚠ Please read</h2>
+      <ul>
+        <li>Pushy Score is an <strong>automated, rule-based scan</strong>. It is <strong>not an audit, a certification, or a guarantee</strong> of anything.</li>
+        <li>It can miss real problems (false negatives) and flag harmless things (false positives). Never rely on it as the only check.</li>
+        <li>A badge shows the result for <strong>one commit on one day</strong>. Code changes; rescan after you push.</li>
+        <li>Scans run in your browser using GitHub's public API and a public CDN. Pushy has no server and stores nothing about you or your repo.</li>
+        <li>$FORCEPUSH is a meme coin with <strong>no intrinsic value and no expected return</strong>. This tool is free, needs no token, and is not financial advice.</li>
+      </ul>
+    </div>
+    <p class="copy">Pushy Score is not affiliated with GitHub, Anthropic, or any scanner vendor. All names belong to their owners.<br><a href="../">← back to $FORCEPUSH</a> 🐹🔴</p>
+  </div>
+</footer>
+<div class="toast" id="toast" role="status"></div>
+
+<script src="rules.js"></script>
+<script src="pushy.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
