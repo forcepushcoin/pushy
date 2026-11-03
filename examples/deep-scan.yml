@@ -1,0 +1,32 @@
+# .github/workflows/pushy.yml
+# Pushy Score on every pull request, plus the optional AI Deep Scan with YOUR key.
+# The score is still plain regex rules. Deep Scan adds a separate "AI opinion" section and never changes the score.
+# The code it reads is sent to the provider you choose (see docs/DEEP_SCAN.md).
+name: Pushy
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+  pull-requests: write
+jobs:
+  pushy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: forcepushcoin/pushy@v1
+        with:
+          fail-under: '70'                         # still decided by the static score only
+          deep-scan: 'true'
+          ai-provider: openai                      # openai (any OpenAI-compatible API) or anthropic
+          ai-model: your-model-name                # required: pick the model and the price yourself
+          ai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          # ai-base-url: https://openrouter.ai/api/v1   # Azure, OpenRouter, vLLM, Ollama, ...
+          # ai-max-files: '20'                     # most files the AI reads (default 20)
+          # ai-max-bytes: '120000'                 # most bytes sent in total (default 120000)
+          # ai-max-requests: '8'                   # most requests to the provider (default 8)
+      # Anthropic instead:
+      #   ai-provider: anthropic
+      #   ai-model: your-model-name
+      #   ai-api-key: ${{ secrets.ANTHROPIC_API_KEY }}

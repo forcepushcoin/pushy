@@ -1,6 +1,7 @@
 'use strict';
 
 var rules = require('../score/rules.js');
+var deepScan = require('./deep.js');
 
 var MARKER = '<!-- pushy-score -->';
 var FOOTER = 'Automated scan, not an audit · Pushy needs no token';
@@ -84,6 +85,10 @@ function renderComment(report, opts) {
     lines.push('');
     report.greenFlags.forEach(function (g) { lines.push('- ' + g); });
   }
+  if (opts.deep) {
+    lines.push('');
+    lines.push(deepScan.renderDeep(opts.deep).replace(/\n+$/, ''));
+  }
   lines.push('');
   lines.push('### Blind spots');
   lines.push('');
@@ -101,7 +106,7 @@ function renderComment(report, opts) {
   return body;
 }
 
-function renderSummary(report) {
+function renderSummary(report, deep) {
   var band = report.band || {};
   var lines = [];
   lines.push('## 🐹 Pushy Score ' + report.score + '/100');
@@ -119,6 +124,9 @@ function renderSummary(report) {
   lines.push('');
   lines.push((report.findings || []).length + ' finding(s). ' + FOOTER);
   lines.push('');
+  if (deep) {
+    lines.push(deepScan.renderDeep(deep, { maxRows: 15, maxList: 20 }));
+  }
   return lines.join('\n');
 }
 

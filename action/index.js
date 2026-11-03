@@ -6,6 +6,7 @@ var cp = require('child_process');
 var pushy = require('../score/pushy.js');
 var comment = require('./comment.js');
 var github = require('./github.js');
+var deepScan = require('./deep.js');
 
 function input(name) {
   var key = 'INPUT_' + String(name).toUpperCase();
@@ -60,6 +61,48 @@ function reportFile(root) {
   return path.join(root, 'pushy-report.json');
 }
 
+/*
+ * Optional AI Deep Scan (docs/DEEP_SCAN.md). Advisory only: it never changes the score or the report above,
+ * never fails the job, and writes its own file. Returns the result to render, or null when it is off.
+ */
+var deepDeps = {}; // tests inject sleep here
+
+async function runDeep(report, scanPath, root, event) {
+  var opts = deepScan.parseOptions(function (n) { return input(n); }, process.env, event);
+  if (!opts.enabled) {
+    setOutput('deep-status', 'off');
+    return null;
+  }
+  if (opts.error) {
+    console.error('::warning::Deep Scan not run: ' + deepScan.logSafe(opts.error, ''));
+    setOutput('deep-status', 'error');
+    return { skipped: 'Deep Scan not run: ' + opts.error, reviewed: [], notReviewed: [], verdicts: [], findings: [], errors: [], requests: {}, status: 'skipped' };
+  }
+  if (opts.skip) {
+    console.log('::notice::' + deepScan.logSafe(opts.skip, ''));
+    setOutput('deep-status', 'skipped');
+    return { skipped: opts.skip, reviewed: [], notReviewed: [], verdicts: [], findings: [], errors: [], requests: {}, status: 'skipped' };
+  }
+  var cfg = opts.config;
+  cfg.key.split(/\r?\n/).forEach(function (part) { if (part.trim()) console.log('::add-mask::' + part.trim()); });
+  console.log('Deep Scan: ' + cfg.provider + ' / ' + deepScan.logSafe(cfg.model, cfg.key) + ' at ' + cfg.host + ' (AI opinion, automated, not an audit)');
+  var deep;
+  try {
+    deep = await deepScan.run(report, scanPath, cfg, deepDeps);
+  } catch (e) {
+    console.log('::warning::Deep Scan failed: ' + deepScan.logSafe(e && e.message, cfg.key));
+    setOutput('deep-status', 'failed');
+    return { skipped: 'Deep Scan failed before any request finished. The basic scan is unaffected.', reviewed: [], notReviewed: [], verdicts: [], findings: [], errors: [], requests: {}, status: 'failed' };
+  }
+  var outPath = path.join(root, 'pushy-deep-report.json');
+  fs.writeFileSync(outPath, JSON.stringify(deep, null, 2));
+  setOutput('deep-status', deep.status);
+  setOutput('deep-report-path', outPath);
+  deep.errors.forEach(function (m) { console.log('::warning::Deep Scan ' + deepScan.logSafe(m, cfg.key)); });
+  console.log('Deep Scan ' + deep.status + ': read ' + deep.reviewed.length + ' file(s), did not read ' + deep.notReviewed.length + ', ' + deep.findings.length + ' new AI finding(s). Score unchanged.');
+  return deep;
+}
+
 async function run() {
   if (String(input('repos')).trim()) return require('./watch.js').run(); // watch mode: scan other repos, keep a tracking issue (docs/WATCH.md)
   var root = workspace();
@@ -81,9 +124,11 @@ async function run() {
   setOutput('band', report.band && report.band.key);
   setOutput('report-path', outPath);
 
-  var summary = comment.renderSummary(report);
-  if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary);
   console.log(report.band.label + ' — ' + report.score + '/100');
+
+  var deep = await runDeep(report, scanPath, root, event);
+  var summary = comment.renderSummary(report, deep);
+  if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, summary);
 
   var exitCode = 0;
   if (wantsComment(input('comment') || 'true')) {
@@ -99,7 +144,7 @@ async function run() {
         var changed = null;
         try { changed = await github.listPullFiles(token, owner, repo, event.pull_request.number); }
         catch (e0) { changed = changedFiles(root); }
-        var body = comment.renderComment(report, { owner: owner, repo: repo, sha: sha, changed: changed });
+        var body = comment.renderComment(report, { owner: owner, repo: repo, sha: sha, changed: changed, deep: deep });
         try {
           var saved = await github.upsertComment(token, owner, repo, event.pull_request.number, body);
           console.log('Updated pull request comment ' + (saved && saved.html_url ? saved.html_url : '#' + event.pull_request.number));
@@ -131,4 +176,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { run: run, shouldFail: shouldFail, wantsComment: wantsComment, input: input };
+module.exports = { deepDeps: deepDeps, run: run, shouldFail: shouldFail, wantsComment: wantsComment, input: input };

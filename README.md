@@ -141,7 +141,7 @@ Node 18+ can load the engine for a rules check (`require('./score/pushy.js')`). 
 
 ## Use in GitHub Actions
 
-`uses: forcepushcoin/pushy@v1` runs the same ruleset on the files in the workflow checkout. It does not download the repo again and it does not upload source. On a `pull_request` it posts or updates one comment, found by the hidden marker `<!-- pushy-score -->`. The job fails only when `fail-under` is set and the score is below that number.
+`uses: forcepushcoin/pushy@v1` runs the same ruleset on the files in the workflow checkout. It does not download the repo again and it does not upload source (unless you turn on the optional [Deep Scan](docs/DEEP_SCAN.md), which sends files to the AI provider you choose). On a `pull_request` it posts or updates one comment, found by the hidden marker `<!-- pushy-score -->`. The job fails only when `fail-under` is set and the score is below that number.
 
 This works on private repositories. The job runs in your account, reads the checkout on the runner, and talks to GitHub only to post the comment (and to read the list of changed file names). Pushy has no server in that path.
 
@@ -170,6 +170,7 @@ jobs:
 | `fail-under` | empty | Fail when the score is below this number. Empty never fails on the score. |
 | `comment` | `true` | Post or update one sticky pull request comment. Ignored when the event is not a pull request. |
 | `github-token` | `${{ github.token }}` | Used for the comment and the changed-file list. |
+| `deep-scan` and `ai-*` | off | Optional AI Deep Scan with your own key. See [docs/DEEP_SCAN.md](docs/DEEP_SCAN.md). |
 
 | Output | What it is |
 | --- | --- |
@@ -203,11 +204,13 @@ Automated scan, not an audit · Pushy needs no token
 | Pushy GitHub Action | Live |
 | [Watchlist](docs/WATCH.md) | Live |
 | [Commit Roast Card](roast/) | Live |
-| AI deep scan | Building |
+| [AI Deep Scan](docs/DEEP_SCAN.md) | Live in the Action, bring your own key. Token payments later |
 | [Ship Log](https://forcepushcoin.github.io/shiplog/) | Live |
 | Rescue | Planned |
 
 **[Commit Roast Card](roast/)** (`roast/`): paste a public repo, get a funny, Pushy-voiced roast of its commit habits and a shareable 1200×630 card. Free, client-side, no backend, no account. Just for fun, not a code review. Live at <https://forcepushcoin.github.io/roast/>.
+
+**[AI Deep Scan](docs/DEEP_SCAN.md)**: an optional section in the Action's comment where a language model, called with **your own API key** from a repository secret, reviews the static findings and the highest-risk files (`SKILL.md`, MCP code, install scripts, hooks) and lists new risks, false-positive calls and fixes. **AI opinion, automated, not an audit.** It never changes the score, it lists exactly which files the AI read and which it did not, and the files it reads are sent to the provider you choose. No key means it is skipped. Example: [`examples/deep-scan.yml`](examples/deep-scan.yml). Token payments for hosted scans are not built.
 
 **[Watchlist](docs/WATCH.md)**: the same action can scan other people's repos (the skills and MCP servers you depend on) on your own daily schedule and open an issue comment when a score drops or a new critical finding appears. It runs on your runner and needs no $FORCEPUSH token. Example: [`examples/watchlist.yml`](examples/watchlist.yml). Do not watch this repository: `fixtures/evil` is a planted bad sample and would raise a critical alert.
 
@@ -222,7 +225,7 @@ Pushy Score is pattern matching on text. It is an automated scan, not an audit o
 The ruleset's own blind spots:
 
 - Paraphrased, translated, split-up, or obfuscated attacks can pass. Padding, bytecode, archives, and prompt-injected judges have been used to fool skill scanners. Pushy lists files it did not read and caps the score when coverage is incomplete. A cap is not a review.
-- No language model and no person reads the instructions. Social engineering is caught only when a rule matches.
+- No person reads the instructions, and no language model does unless you turn on the optional [Deep Scan](docs/DEEP_SCAN.md). Social engineering is caught only when a rule matches.
 - Pages and docs a skill links to are never fetched. A clean file can point at instructions that change later.
 - Binaries, archives, `.pyc` bytecode, office documents, and images are not opened.
 - Only the files listed as analyzed were read: at most 400 scannable files, 15 MB total, and 500 KB each. Anything over that budget, or that failed to download, is listed as not analyzed and caps the score.
@@ -246,6 +249,7 @@ Pushy Score is not affiliated with GitHub, Anthropic, or any scanner vendor.
 | [`shiplog/`](shiplog/) | Ship Log. Open `index.html` via a local server. |
 | [`action.yml`](action.yml) | GitHub Action. `uses: forcepushcoin/pushy@v1`. |
 | [`action/watch.js`](action/watch.js) | Watch mode of the action. See [`docs/WATCH.md`](docs/WATCH.md). |
+| [`action/deep.js`](action/deep.js) | Optional AI Deep Scan (your key). See [`docs/DEEP_SCAN.md`](docs/DEEP_SCAN.md). |
 | [`examples/`](examples/) | Example workflows. |
 | [`BOUNTIES.md`](BOUNTIES.md) | Bounty board rules. Payouts are planned at launch. |
 | [`assets/`](assets/) | `pp-avatar.jpg` (mascot on the scanner and at the top of this page) and `pp.jpg` (the same hamster on a CRT). |

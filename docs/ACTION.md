@@ -37,6 +37,7 @@ Check out the repo before the action. The scan reads that checkout. It does not 
 | `fail-under` | empty | Fail the job when the score is **below** this number. `70` fails on 69 and passes on 70. An empty value never fails because of the score. |
 | `comment` | `true` | On `pull_request`, post or update one comment. Any other event logs a skip. `false` posts nothing. |
 | `github-token` | `${{ github.token }}` | Sent only to `api.github.com`, to post the comment and to read changed file names. |
+| `deep-scan`, `ai-provider`, `ai-model`, `ai-api-key`, `ai-base-url`, `ai-max-files`, `ai-max-bytes`, `ai-max-requests` | off | Optional AI Deep Scan with your own key. A separate section, never changes the score. See [DEEP_SCAN.md](DEEP_SCAN.md). |
 | `repos` and the other watch inputs | empty | Watch mode: scan other repos on a schedule and keep a tracking issue. See [WATCH.md](WATCH.md). |
 
 Setting `repos` switches the action to watch mode and the inputs above (`path`, `comment`, `fail-under`) are ignored. See [WATCH.md](WATCH.md).
@@ -48,6 +49,7 @@ Setting `repos` switches the action to watch mode and the inputs above (`path`, 
 | `score` | Integer from 0 to 100. |
 | `band` | `green`, `yellow`, `orange`, `red`, or `gray`. |
 | `report-path` | Absolute path of `pushy-report.json` written at the workspace root. |
+| `deep-status`, `deep-report-path` | Deep Scan only. See [DEEP_SCAN.md](DEEP_SCAN.md). |
 | `alerts`, `issue-url` | Watch mode only. See [WATCH.md](WATCH.md). |
 
 The job summary (`GITHUB_STEP_SUMMARY`) gets a short version of the same verdict.
@@ -58,7 +60,7 @@ The job summary (`GITHUB_STEP_SUMMARY`) gets a short version of the same verdict
 
 Repo rules that need GitHub metadata (archived, fork, description, created date, license SPDX) use the workflow event payload already on disk. Commit dates come from `git log` when the scanned directory is the git root. A subfolder scan does not borrow the parent repository's commit list.
 
-Nothing in the tree is uploaded. The only requests are GitHub API calls for the pull request comment and, when that comment is on, the list of changed file names. File bodies from that API response are discarded. The JSON report stays on the runner.
+Nothing in the tree is uploaded unless you turn on the optional [Deep Scan](DEEP_SCAN.md), which sends the files it reads to the AI provider you choose. Otherwise the only requests are GitHub API calls for the pull request comment and, when that comment is on, the list of changed file names. File bodies from that API response are discarded. The JSON report stays on the runner.
 
 ## Private repositories
 

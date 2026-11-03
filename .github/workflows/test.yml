@@ -46,6 +46,14 @@ jobs:
           path: fixtures/evil
           comment: 'false'
           fail-under: '80'
+      - name: Deep Scan without a key is skipped and changes nothing
+        id: deepskip
+        uses: ./
+        with:
+          path: fixtures/evil
+          comment: 'false'
+          deep-scan: 'true'
+          ai-model: ci-no-key
       - name: Check action outputs
         env:
           CLEAN_SCORE: ${{ steps.clean.outputs.score }}
@@ -54,6 +62,8 @@ jobs:
           EVIL_BAND: ${{ steps.evil.outputs.band }}
           EVIL_REPORT: ${{ steps.evil.outputs.report-path }}
           GATED: ${{ steps.gated.outcome }}
+          SKIP_SCORE: ${{ steps.deepskip.outputs.score }}
+          SKIP_STATUS: ${{ steps.deepskip.outputs.deep-status }}
         run: |
           set -eu
           echo "clean ${CLEAN_SCORE} ${CLEAN_BAND}"
@@ -63,6 +73,8 @@ jobs:
           test "${EVIL_SCORE}" -lt 45
           test "${EVIL_BAND}" = "red"
           test "${GATED}" = "failure"
+          test "${SKIP_STATUS}" = "skipped"
+          test "${SKIP_SCORE}" = "${EVIL_SCORE}"
           test -n "${EVIL_REPORT}"
           test -f "${EVIL_REPORT}"
           node -e "const r=require(process.argv[1]); if (r.score>=45||r.band.key!=='red') process.exit(1)" "${EVIL_REPORT}"

@@ -1,5 +1,5 @@
 name: Pushy Score
-description: Score a checkout of AI skills, prompt libraries, or MCP servers and post one sticky pull request comment, or watch other repos on a schedule and open an issue when a score drops. Does not upload your code.
+description: Score a checkout of AI skills, prompt libraries, or MCP servers and post one sticky pull request comment, or watch other repos on a schedule and open an issue when a score drops. Does not upload your code unless you turn on the optional bring-your-own-key Deep Scan.
 author: forcepushcoin
 branding:
   icon: shield
@@ -18,7 +18,7 @@ inputs:
     required: false
     default: 'true'
   github-token:
-    description: Token used only to post or update the pull request comment. The scan itself does not send file contents anywhere.
+    description: Token used only to post or update the pull request comment. The scan itself does not send file contents anywhere (only the optional Deep Scan does, to the AI provider you choose).
     required: false
     default: ${{ github.token }}
   repos:
@@ -57,6 +57,38 @@ inputs:
     description: Watch mode. Optional token (for example a fine-grained PAT with Contents read) used to clone and read watched private repositories. Public repos need none.
     required: false
     default: ''
+  deep-scan:
+    description: 'Optional AI Deep Scan (bring your own key). true turns it on. It adds a separate AI opinion next to the score and never changes the score. Needs ai-api-key and ai-model. The code it reads is sent to the provider you choose. Ignored in watch mode.'
+    required: false
+    default: 'false'
+  ai-provider:
+    description: Deep Scan. openai (any OpenAI-compatible chat completions API) or anthropic (Messages API).
+    required: false
+    default: 'openai'
+  ai-model:
+    description: Deep Scan. Model name at your provider. Required, Pushy does not pick one for you.
+    required: false
+    default: ''
+  ai-api-key:
+    description: Deep Scan. Your provider API key, from your own repository secret. Sent only to the provider endpoint. Empty means Deep Scan is skipped.
+    required: false
+    default: ''
+  ai-base-url:
+    description: 'Deep Scan. API base URL. Default is the provider''s own (https://api.openai.com/v1 or https://api.anthropic.com). Set it for Azure, OpenRouter, Ollama, vLLM and other compatible endpoints. Must be https (http only for localhost).'
+    required: false
+    default: ''
+  ai-max-files:
+    description: Deep Scan. Most files the AI reads, picked by risk (default 20, max 100). The rest are listed as not read.
+    required: false
+    default: '20'
+  ai-max-bytes:
+    description: Deep Scan. Most bytes of repo text sent to the provider in total (default 120000). Files over the budget are listed as not read.
+    required: false
+    default: '120000'
+  ai-max-requests:
+    description: Deep Scan. Most requests to the provider (default 8, max 30). Files that would need more are listed as not read.
+    required: false
+    default: '8'
 outputs:
   score:
     description: Integer score from 0 to 100.
@@ -64,6 +96,10 @@ outputs:
     description: Band key. One of green, yellow, orange, red, gray.
   report-path:
     description: Workspace path of the JSON report (pushy-report.json, or pushy-watch-report.json in watch mode).
+  deep-status:
+    description: Deep Scan result. off, skipped, error, failed, partial (some files not read) or reviewed (every file the static scan read was sent).
+  deep-report-path:
+    description: Workspace path of pushy-deep-report.json (only when Deep Scan ran).
   alerts:
     description: Watch mode. Number of alerts raised in this run.
   issue-url:
